@@ -2,7 +2,9 @@
 
 语言：[English](README.md) | [简体中文](README.zh-CN.md)
 
-这是一个纯执行型 MCP server，用来让 Codex、Claude Desktop 或其他 MCP 宿主把真实代码修改任务交给 DeepSeek V4 worker 执行。
+这是一个主要面向 Codex Desktop 的纯执行型 MCP server，用来把真实代码修改任务交给 DeepSeek V4 worker 执行。
+
+它的目标不是替代 Codex，而是降低 Codex 主对话在代码任务里的 token 消耗：Codex 负责确定任务边界、轮询状态和最终审查 diff/check，DeepSeek worker 负责单线程完成实现。对适合的代码任务，目标是减少约 40-60% 的 Codex 主线程 token 消耗。
 
 它不是一个独立的 DeepSeek 客户端。项目内置了一个很小的 `claude-deepseek` 启动器：它会调用本机 Claude Code CLI，并把这次子进程请求切到 DeepSeek 的 Anthropic-compatible endpoint。
 
@@ -18,10 +20,10 @@ MCP 宿主
 
 ## 快速开始
 
-从 npm 安装：
+从 GitHub 安装：
 
 ```bash
-npm i -g deepseek-worker-mcp
+npm i -g github:louchi1984-coder/deepseek-claude-code-worker-mcp#v0.3.20-beta.5
 deepseek-code-worker-setup
 deepseek-code-worker-mcp --doctor
 ```
@@ -61,10 +63,10 @@ npm run mcp:doctor
 }
 ```
 
-如果 npm registry 还不可用，可以先从 GitHub 安装：
+发布到 npm 后，可以使用更短命令：
 
 ```bash
-npm install -g github:louchi1984-coder/deepseek-claude-code-worker-mcp#v0.3.20-beta.5
+npm i -g deepseek-worker-mcp
 ```
 
 ## 依赖

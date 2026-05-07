@@ -2,8 +2,13 @@
 
 Languages: [English](README.md) | [简体中文](README.zh-CN.md)
 
-Pure-execution MCP server that lets Codex, Claude Desktop, or another MCP host
-delegate real workspace code changes to DeepSeek V4 through Claude Code.
+Pure-execution MCP server for Codex Desktop. It lets Codex delegate real coding
+work to DeepSeek V4 through Claude Code, so the main Codex conversation can stay
+focused on task boundaries, status polling, and final diff/check review.
+
+For suitable coding tasks, the intended workflow can reduce Codex main-thread
+token usage by about 40-60%: Codex defines the task, DeepSeek performs the
+implementation in a worker process, and Codex reviews the compact artifacts.
 
 This is not a standalone DeepSeek client. It includes a small `claude-deepseek`
 launcher that runs the local Claude Code CLI against DeepSeek's
@@ -22,6 +27,26 @@ MCP host
 The worker is intentionally not advisory. A call succeeds only when real files change.
 
 ## Quick Start
+
+Install directly from GitHub:
+
+```bash
+npm i -g github:louchi1984-coder/deepseek-claude-code-worker-mcp#v0.3.20-beta.5
+deepseek-code-worker-setup
+deepseek-code-worker-mcp --doctor
+```
+
+Configure the MCP client:
+
+```json
+{
+  "mcpServers": {
+    "deepseek-code-worker": {
+      "command": "deepseek-code-worker-mcp"
+    }
+  }
+}
+```
 
 From a cloned repo:
 
@@ -44,30 +69,12 @@ Point the MCP client at the repo script:
 }
 ```
 
-Install from npm:
+When npm publishing is available, the install command becomes:
 
 ```bash
 npm i -g deepseek-worker-mcp
 deepseek-code-worker-setup
 deepseek-code-worker-mcp --doctor
-```
-
-Before the npm package is available in your registry, install directly from GitHub:
-
-```bash
-npm install -g github:louchi1984-coder/deepseek-claude-code-worker-mcp#v0.3.20-beta.5
-deepseek-code-worker-setup
-deepseek-code-worker-mcp --doctor
-```
-
-```json
-{
-  "mcpServers": {
-    "deepseek-code-worker": {
-      "command": "deepseek-code-worker-mcp"
-    }
-  }
-}
 ```
 
 ## Requirements
