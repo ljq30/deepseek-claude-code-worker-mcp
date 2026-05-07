@@ -31,7 +31,7 @@ The worker is intentionally not advisory. A call succeeds only when real files c
 Install directly from GitHub:
 
 ```bash
-npm i -g github:louchi1984-coder/deepseek-claude-code-worker-mcp#v0.3.20-beta.5
+npm i -g github:louchi1984-coder/deepseek-claude-code-worker-mcp#v0.3.20-beta.6
 deepseek-code-worker-setup
 deepseek-code-worker-mcp --doctor
 ```
