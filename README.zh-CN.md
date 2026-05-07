@@ -18,6 +18,21 @@ MCP 宿主
 
 这个 worker 不是用来提建议的。一次调用只有在真实文件发生变化时才算成功。
 
+## 这个 MCP 做了什么
+
+它不只是“把 Claude Code 指到 DeepSeek”的薄包装。为了让 Codex 真正能把 DeepSeek 当后台代码 worker 使用，这个 MCP 补了运行时能力：
+
+- **异步 worker job**：启动任务后返回 `job_id`，worker 不依赖单次前台工具调用存活。
+- **90 秒 heartbeat**：`deepseek_wait_for_job` 只短暂观察；没完成就返回 `running`，避免撞上宿主前台工具调用超时。
+- **结构化状态**：`get_job` / `tail_job` 返回 phase、进程存活、idle 时间、最近 stream 事件、已变更文件、stdout/stderr tail、建议轮询时间。
+- **DeepSeek 思考时间预期**：文档明确告诉调用方，连续 thinking/quiet 几分钟甚至 Pro 约 10 分钟可以是正常现象。
+- **权限护栏**：默认 worker 使用 MCP 生成的 Claude Code `dontAsk` settings，并通过 `PreToolUse` hook 控制危险 Bash、禁用路径和越界写入；`bypassPermissions` 默认禁用。
+- **scoped patch 模式**：调用方可以传窄 `allowed_dirs`，让 worker 只能在指定范围内改。
+- **快照 diff 和 policy**：MCP 在任务前后做 workspace snapshot，返回 changed files、unified diff、forbidden path、docs-only policy、checks 结果。
+- **恢复和清理**：job 状态持久化到系统临时目录；MCP 重启后可以恢复状态；server 关闭时会清理仍在跑的 worker 子进程。
+- **setup/doctor 流程**：首次运行可在用户确认后安装 Claude Code，保存 DeepSeek key，并用 `--doctor` 验证环境。
+- **跨平台收口**：macOS/Linux 是主要目标；Windows 做了 best-effort 支持，包括临时目录、可执行文件查找和 check shell 的平台适配。
+
 ## 快速开始
 
 从 GitHub 安装：

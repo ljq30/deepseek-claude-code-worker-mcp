@@ -26,6 +26,35 @@ MCP host
 
 The worker is intentionally not advisory. A call succeeds only when real files change.
 
+## What This MCP Adds
+
+This project is more than a thin "point Claude Code at DeepSeek" wrapper. The MCP
+adds the runtime pieces Codex needs to use DeepSeek as a practical background
+coding worker:
+
+- **Async worker jobs**: start a task, get a `job_id`, and keep the worker running
+  independently of a single foreground tool call.
+- **Passive 90s heartbeat**: `deepseek_wait_for_job` observes briefly and returns
+  `running` if the worker is still active, avoiding host-side foreground timeouts.
+- **Structured status**: `get_job` / `tail_job` return phase, process liveness,
+  idle time, recent stream events, changed files so far, stdout/stderr tails, and
+  recommended poll timing.
+- **DeepSeek thinking expectations**: the README tells calling agents that long
+  continuous thinking segments can be normal, especially for `deepseek-v4-pro[1m]`.
+- **Permission guardrails**: default workers use MCP-managed Claude Code `dontAsk`
+  settings plus a `PreToolUse` hook, while `bypassPermissions` stays disabled.
+- **Scoped patch mode**: callers can provide narrow `allowed_dirs` so a worker is
+  limited to a specific patch area.
+- **Snapshot diff and policy**: the MCP snapshots the workspace before/after, then
+  reports changed files, unified diffs, forbidden path violations, docs-only
+  policy, and checks.
+- **Restore and cleanup**: job state is persisted under the OS temp directory,
+  restored after MCP restart, and server shutdown cleans up active child workers.
+- **Setup/doctor flow**: first run can install Claude Code with user confirmation,
+  save a DeepSeek key, and verify the environment with `--doctor`.
+- **Cross-platform cleanup**: macOS/Linux are primary targets; Windows support is
+  best-effort with platform-aware temp paths, executable lookup, and check shell.
+
 ## Quick Start
 
 Install directly from GitHub:
