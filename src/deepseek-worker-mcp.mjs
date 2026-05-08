@@ -55,17 +55,38 @@ const tools = [
     name: "deepseek_implement_in_workspace",
     description:
       "Pure execution worker. Runs Claude Code through claude-deepseek in a real workspace, requires real file changes, and returns changed files plus validation status. Use for implementation tasks, not advice.",
+    annotations: {
+      title: "Run DeepSeek worker synchronously",
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
     inputSchema: implementationSchema({ includeAsync: false }),
   },
   {
     name: "deepseek_start_implementation",
     description:
       "Start a long-running pure execution worker job and return immediately with a job id. Poll with deepseek_get_job.",
+    annotations: {
+      title: "Start DeepSeek worker job",
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
     inputSchema: implementationSchema({ includeAsync: true }),
   },
   {
     name: "deepseek_get_job",
     description: "Get the current status/result of a deepseek_start_implementation job.",
+    annotations: {
+      title: "Read DeepSeek worker status",
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: "object",
       properties: {
@@ -78,6 +99,13 @@ const tools = [
   {
     name: "deepseek_tail_job",
     description: "Return running job progress, stdout/stderr tails, and files changed so far.",
+    annotations: {
+      title: "Read DeepSeek worker tail",
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: "object",
       properties: {
@@ -91,6 +119,13 @@ const tools = [
     name: "deepseek_wait_for_job",
     description:
       "Observe a running DeepSeek worker job for a short foreground window. Returns completion/failure if done; otherwise returns running status and recent activity. Does not cancel or review the worker.",
+    annotations: {
+      title: "Observe DeepSeek worker job",
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: "object",
       properties: {
@@ -116,6 +151,13 @@ const tools = [
   {
     name: "deepseek_cancel_job",
     description: "Request cancellation of a running DeepSeek worker job.",
+    annotations: {
+      title: "Cancel DeepSeek worker job",
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: "object",
       properties: {
