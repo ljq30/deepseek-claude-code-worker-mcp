@@ -3,7 +3,7 @@ import { createInterface } from "node:readline";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { JOB_ROOT } from "../src/core/config.mjs";
+import { JOB_ROOT, USE_CASES } from "../src/core/config.mjs";
 
 const jobId = "dsw_restore_smoke";
 const runningJobId = "dsw_running_no_wait_smoke";
@@ -192,6 +192,7 @@ console.log(JSON.stringify({
   verbose_get_has_diffs: hasKeyDeep(verboseGetJob, "file_diffs"),
   invalid_poll_error: invalidPoll.error?.message ?? null,
   changed_files: getJob.progress?.changed_files_so_far ?? [],
+  auto_reasoning_effort: USE_CASES.auto.reasoning_effort,
 }, null, 2));
 
 if (stderr) process.stderr.write(stderr);
@@ -216,6 +217,7 @@ if (
   || !hasKeyDeep(verboseGetJob, "file_diffs")
   || invalidPoll.error?.message !== "poll_after_ms must be a positive number"
   || !getJob.progress?.changed_files_so_far?.includes("sample.js")
+  || USE_CASES.auto.reasoning_effort !== "max"
 ) {
   process.exitCode = 1;
 }

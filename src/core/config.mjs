@@ -2,7 +2,7 @@ import { dirname, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
-export const SERVER_VERSION = "0.3.20-beta.27";
+export const SERVER_VERSION = "0.3.20-beta.28";
 export const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 export const SELF_SCRIPT = resolve(process.argv[1] ?? "deepseek-worker-mcp.mjs");
 export const DEFAULT_CLAUDE_DEEPSEEK = resolve(PACKAGE_ROOT, "bin/claude-deepseek.mjs");
@@ -98,7 +98,7 @@ export const USE_CASES = {
   auto: {
     model: "deepseek-v4-flash",
     thinking: "enabled",
-    reasoning_effort: "high",
+    reasoning_effort: "max",
     poll_after_ms: DEFAULT_POLL_AFTER_MS,
     idle_after_ms: DEFAULT_IDLE_AFTER_MS,
     verification_profile: "smoke",
