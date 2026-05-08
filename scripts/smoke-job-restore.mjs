@@ -126,12 +126,17 @@ send(6, "tools/call", {
     poll_after_ms: 0,
   },
 });
+send(7, "tools/call", {
+  name: "deepseek_get_job",
+  arguments: { job_id: jobId, include_logs: true, include_events: true, include_diff: true },
+});
 
 const getJob = parseToolPayload(await waitForResponseId(2, 5000));
 const waitJob = parseToolPayload(await waitForResponseId(3, 5000));
 const noWaitJob = parseToolPayload(await waitForResponseId(4, 5000));
 const runningNoWaitJob = parseToolPayload(await waitForResponseId(5, 5000));
 const invalidPoll = await waitForResponseId(6, 5000);
+const verboseGetJob = parseToolPayload(await waitForResponseId(7, 5000));
 server.kill("SIGTERM");
 runningPlaceholder.kill("SIGTERM");
 rmSync(jobDir, { recursive: true, force: true });
@@ -147,6 +152,11 @@ console.log(JSON.stringify({
   no_wait_reason: noWaitJob.reason,
   running_no_wait_status: runningNoWaitJob.status,
   running_no_wait_reason: runningNoWaitJob.reason,
+  default_get_has_logs: hasLogs(getJob),
+  default_get_has_events: hasEvents(getJob),
+  default_get_has_diffs: hasDiffs(getJob),
+  verbose_get_has_logs: hasLogs(verboseGetJob),
+  verbose_get_has_events: hasEvents(verboseGetJob),
   invalid_poll_error: invalidPoll.error?.message ?? null,
   changed_files: getJob.progress?.changed_files_so_far ?? [],
 }, null, 2));
@@ -161,6 +171,11 @@ if (
   || noWaitJob.reason !== "orphaned_after_mcp_restart"
   || runningNoWaitJob.status !== "running"
   || runningNoWaitJob.reason !== "no_wait_requested"
+  || hasLogs(getJob)
+  || hasEvents(getJob)
+  || hasDiffs(getJob)
+  || !hasLogs(verboseGetJob)
+  || !hasEvents(verboseGetJob)
   || invalidPoll.error?.message !== "poll_after_ms must be a positive number"
   || !getJob.progress?.changed_files_so_far?.includes("sample.js")
 ) {
@@ -174,6 +189,18 @@ function send(id, method, params = {}) {
 function parseToolPayload(response) {
   const text = response.result?.content?.[0]?.text ?? "{}";
   return JSON.parse(text);
+}
+
+function hasLogs(payload) {
+  return payload.worker?.stdout_tail !== undefined || payload.worker?.stderr_tail !== undefined;
+}
+
+function hasEvents(payload) {
+  return payload.worker?.recent_events !== undefined;
+}
+
+function hasDiffs(payload) {
+  return payload.result?.file_diffs !== undefined;
 }
 
 function waitForResponseId(id, timeoutMs) {

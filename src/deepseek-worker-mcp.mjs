@@ -91,6 +91,9 @@ const tools = [
       type: "object",
       properties: {
         job_id: { type: "string" },
+        include_logs: { type: "boolean", description: "Include stdout/stderr tails. Defaults to false to save caller tokens." },
+        include_events: { type: "boolean", description: "Include recent stream-json events. Defaults to false." },
+        include_diff: { type: "boolean", description: "Include per-file unified diffs from the final result. Defaults to false." },
       },
       required: ["job_id"],
       additionalProperties: false,
@@ -98,7 +101,7 @@ const tools = [
   },
   {
     name: "deepseek_tail_job",
-    description: "Return running job progress, stdout/stderr tails, and files changed so far.",
+    description: "Return compact running job progress and files changed so far. Logs/events are opt-in to save caller tokens.",
     annotations: {
       title: "Read DeepSeek worker tail",
       readOnlyHint: true,
@@ -110,6 +113,8 @@ const tools = [
       type: "object",
       properties: {
         job_id: { type: "string" },
+        include_logs: { type: "boolean", description: "Include stdout/stderr tails. Defaults to false." },
+        include_events: { type: "boolean", description: "Include recent stream-json events. Defaults to false." },
       },
       required: ["job_id"],
       additionalProperties: false,
@@ -139,6 +144,9 @@ const tools = [
           type: "number",
           description: "Polling interval while observing. Defaults to the job's recommended poll interval.",
         },
+        include_logs: { type: "boolean", description: "Include stdout/stderr tails if the job reaches a terminal state. Defaults to false." },
+        include_events: { type: "boolean", description: "Include recent stream-json events. Defaults to false." },
+        include_diff: { type: "boolean", description: "Include per-file unified diffs if the job reaches a terminal state. Defaults to false." },
         quiet_with_changes_ms: {
           type: "number",
           description: "Deprecated compatibility field. Running jobs are not marked needs_review by quiet time.",
@@ -503,7 +511,7 @@ async function callTool(params) {
     if (!job) {
       return toolResult({ status: "not_found", job_id: args.job_id });
     }
-    return toolResult(serializeJob(job));
+    return toolResult(serializeJob(job, outputOptions(args)));
   }
 
   if (name === "deepseek_tail_job") {
@@ -513,16 +521,7 @@ async function callTool(params) {
     }
     return toolResult({
       ...progressForJob(job),
-      worker: {
-        stdout_tail: tail(job.stdout ?? ""),
-        stderr_tail: tail(job.stderr ?? ""),
-        claude_args_preview: job.claude_args_preview ?? null,
-        output_format: job.output_format,
-        last_event_at: job.last_event_at,
-        last_event_type: job.last_event_type,
-        last_event_summary: job.last_event_summary,
-        recent_events: job.stream_events ?? [],
-      },
+      worker: workerStatus(job, outputOptions(args)),
       job_dir: job.job_dir,
       recommended_poll_after_ms: recommendedPollAfterMs(job),
       next_poll: nextPollHint(job),
@@ -1546,7 +1545,76 @@ function isAcceptedResultStatus(status) {
     || status === "partial_cancelled";
 }
 
-function serializeJob(job) {
+function outputOptions(args = {}) {
+  return {
+    include_logs: Boolean(args.include_logs),
+    include_events: Boolean(args.include_events),
+    include_diff: Boolean(args.include_diff),
+  };
+}
+
+function workerStatus(job, options = {}) {
+  const worker = {
+    output_format: job.output_format,
+    last_event_at: job.last_event_at,
+    last_event_type: job.last_event_type,
+    last_event_summary: job.last_event_summary,
+    last_successful_tool: job.last_successful_tool ?? null,
+    last_failed_tool: job.last_failed_tool ?? null,
+    last_error_kind: job.last_error_kind ?? null,
+    tool_calls_since_last_change: job.tool_calls_since_last_change ?? 0,
+  };
+  if (options.include_logs) {
+    worker.claude_args_preview = job.claude_args_preview ?? null;
+    worker.stdout_tail = tail(job.stdout ?? "");
+    worker.stderr_tail = tail(job.stderr ?? "");
+  }
+  if (options.include_events) {
+    worker.recent_events = job.stream_events ?? [];
+  }
+  return worker;
+}
+
+function resultForOutput(result, options = {}) {
+  if (!result) return result;
+  const output = { ...result };
+  delete output.file_diffs;
+  output.checks_run = checksForOutput(result.checks_run ?? [], options);
+  if (result.worker) {
+    output.worker = {
+      exit_code: result.worker.exit_code,
+      timed_out: result.worker.timed_out,
+      cancelled: result.worker.cancelled,
+      output_format: result.worker.output_format,
+      events_seen: result.worker.events_seen,
+      last_event_type: result.worker.last_event_type,
+      last_event_summary: result.worker.last_event_summary,
+    };
+    if (options.include_logs) {
+      output.worker.claude_args_preview = result.worker.claude_args_preview;
+      output.worker.stdout_tail = result.worker.stdout_tail;
+      output.worker.stderr_tail = result.worker.stderr_tail;
+    }
+  }
+  if (options.include_diff) {
+    output.file_diffs = result.file_diffs ?? [];
+  }
+  return output;
+}
+
+function checksForOutput(checks, options = {}) {
+  if (!Array.isArray(checks)) return [];
+  return checks.map((check) => {
+    if (options.include_logs) return check;
+    return {
+      command: check.command,
+      exit_code: check.exit_code,
+      timed_out: check.timed_out,
+    };
+  });
+}
+
+function serializeJob(job, options = {}) {
   return {
     id: job.id,
     status: job.status,
@@ -1561,21 +1629,8 @@ function serializeJob(job) {
     recommended_poll_after_ms: recommendedPollAfterMs(job),
     next_poll: nextPollHint(job),
     progress: progressForJob(job),
-      worker: {
-        stdout_tail: tail(job.stdout ?? ""),
-        stderr_tail: tail(job.stderr ?? ""),
-        claude_args_preview: job.claude_args_preview ?? null,
-        output_format: job.output_format,
-      last_event_at: job.last_event_at,
-      last_event_type: job.last_event_type,
-      last_event_summary: job.last_event_summary,
-      recent_events: job.stream_events ?? [],
-      last_successful_tool: job.last_successful_tool ?? null,
-      last_failed_tool: job.last_failed_tool ?? null,
-      last_error_kind: job.last_error_kind ?? null,
-      tool_calls_since_last_change: job.tool_calls_since_last_change ?? 0,
-    },
-    result: job.result,
+    worker: workerStatus(job, options),
+    result: resultForOutput(job.result, options),
     error: job.error,
     job_dir: job.job_dir,
   };
@@ -1586,6 +1641,7 @@ async function waitForJob(args) {
   if (!job) {
     return { status: "not_found", job_id: args.job_id };
   }
+  const options = outputOptions(args);
 
   const waitRequested = args.max_wait_ms != null;
   const requestedMaxWaitMs = waitRequested
@@ -1606,7 +1662,7 @@ async function waitForJob(args) {
       job_id: job.id,
       elapsed_wait_ms: Date.now() - started,
       progress: initialProgress,
-      result: job.result,
+      result: resultForOutput(job.result, options),
       error: job.error,
       observations,
     };
@@ -1623,7 +1679,7 @@ async function waitForJob(args) {
         job_id: job.id,
         elapsed_wait_ms: Date.now() - started,
         progress,
-        result: job.result,
+        result: resultForOutput(job.result, options),
         error: job.error,
         observations,
         suggested_action: decision.suggested_action,
@@ -1648,7 +1704,7 @@ async function waitForJob(args) {
     foreground_wait_cap_ms: DEFAULT_FOREGROUND_WAIT_CAP_MS,
     hit_foreground_cap: hitForegroundCap,
     progress,
-    result: job.result,
+    result: resultForOutput(job.result, options),
     error: job.error,
     observations,
     suggested_action: !waitRequested

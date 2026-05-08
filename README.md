@@ -56,9 +56,10 @@ coding worker:
   but the normal loop should use `deepseek_get_job`.
 - **Host keep-alive poll hint**: running job responses include `next_poll` so
   Codex can keep waiting without interfering with the worker.
-- **Structured status**: `get_job` / `tail_job` return phase, process liveness,
-  idle time, recent stream events, changed files so far, stdout/stderr tails, and
-  recommended poll timing.
+- **Compact structured status**: `get_job` / `tail_job` return phase, process
+  liveness, idle time, changed files so far, and recommended poll timing by
+  default. Logs, stream events, and unified diffs are opt-in so Codex does not
+  spend tokens reading evidence before terminal review.
 - **DeepSeek thinking expectations**: the README tells calling agents that long
   continuous thinking segments can be normal, especially for `deepseek-v4-pro[1m]`.
 - **Permission guardrails**: default workers use MCP-managed Claude Code `dontAsk`
@@ -80,7 +81,7 @@ coding worker:
 Install directly from GitHub:
 
 ```bash
-npm i -g github:louchi1984-coder/deepseek-claude-code-worker-mcp#v0.3.20-beta.19
+npm i -g github:louchi1984-coder/deepseek-claude-code-worker-mcp#v0.3.20-beta.20
 ```
 
 Global interactive installs run setup automatically. Setup checks Claude Code,
@@ -91,7 +92,7 @@ manual next step instead of blocking npm.
 To smoke-test the GitHub package without installing globally:
 
 ```bash
-npx github:louchi1984-coder/deepseek-claude-code-worker-mcp#v0.3.20-beta.19 --doctor
+npx github:louchi1984-coder/deepseek-claude-code-worker-mcp#v0.3.20-beta.20 --doctor
 ```
 
 Configure the MCP client:
@@ -225,11 +226,13 @@ Then read status with a non-blocking call:
 }
 ```
 
-Use `deepseek_tail_job` when you need recent stdout/stderr and compact stream
-events. Use `deepseek_wait_for_job` only as a short observation window; do not
-make one long foreground tool call just because DeepSeek may think for a long
-time. Long thinking is normal, and the worker keeps running independently of
-individual `get`, `tail`, or `wait` calls.
+`deepseek_get_job`, `deepseek_tail_job`, and `deepseek_wait_for_job` are compact
+by default. They do not include stdout/stderr tails, recent stream events, or
+per-file diffs unless the caller explicitly passes `include_logs`,
+`include_events`, or `include_diff`. Use `deepseek_wait_for_job` only as a short
+observation window; do not make one long foreground tool call just because
+DeepSeek may think for a long time. Long thinking is normal, and the worker keeps
+running independently of individual `get`, `tail`, or `wait` calls.
 
 Default rules for callers:
 
@@ -241,6 +244,8 @@ Default rules for callers:
   asks for nested worker delegation.
 - Prefer `deepseek_start_implementation` for standard tasks.
 - After start, prefer `deepseek_get_job` or `deepseek_tail_job` for status.
+- Keep status polling compact. Do not request logs/events/diffs until terminal
+  review or explicit debugging.
 - Treat `next_poll.after_ms` as a normal status-check cadence. Poll once around
   that time with `deepseek_get_job`; do not treat it as a liveness timeout.
 - If you use `deepseek_wait_for_job`, treat it as a short foreground observation
@@ -523,16 +528,20 @@ While a job is running, `deepseek_get_job` and `deepseek_tail_job` report:
 - `suggested_action`
 - `process_alive`
 - `last_event_summary`
-- `recent_events`
-- `stdout_tail`
-- `stderr_tail`
 - `recommended_poll_after_ms`
+
+Large evidence is opt-in:
+
+- pass `include_logs: true` for `stdout_tail` / `stderr_tail`
+- pass `include_events: true` for recent stream-json events
+- pass `include_diff: true` on `get_job` / `wait_for_job` when terminal review
+  needs per-file unified diffs
 
 For status polling, prefer `deepseek_get_job` or `deepseek_tail_job`; both return
 immediately. `deepseek_wait_for_job` is only a bounded observation helper. It
 loops inside the MCP server for the requested observation window. If the worker
 completes or fails during that window, it returns the terminal status. Otherwise
-it returns `status: "running"` with recent activity and changed files so far. It
+it returns `status: "running"` with compact activity and changed files so far. It
 never cancels the worker by itself, and elapsed observation time is not a
 recommendation to cancel.
 
