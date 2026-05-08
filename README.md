@@ -6,6 +6,11 @@ Pure-execution MCP server for Codex Desktop. It lets Codex delegate real coding
 work to DeepSeek V4 through Claude Code, so the main Codex conversation can stay
 focused on task boundaries, status polling, and final diff/check review.
 
+The design goal is to save **Codex main-thread tokens**, not DeepSeek tokens.
+DeepSeek is allowed to spend time and tokens doing the implementation work;
+Codex should avoid re-reading the whole codebase, watching long logs, or
+rewriting the same patch in the foreground conversation.
+
 For suitable coding tasks, the intended workflow can reduce Codex main-thread
 token usage by about 40-60%: Codex defines the task, DeepSeek performs the
 implementation in a worker process, and Codex reviews the compact artifacts.
@@ -60,7 +65,7 @@ coding worker:
 Install directly from GitHub:
 
 ```bash
-npm i -g github:louchi1984-coder/deepseek-claude-code-worker-mcp#v0.3.20-beta.10
+npm i -g github:louchi1984-coder/deepseek-claude-code-worker-mcp#v0.3.20-beta.11
 ```
 
 Global interactive installs run setup automatically. Setup checks Claude Code,
@@ -71,7 +76,7 @@ manual next step instead of blocking npm.
 To smoke-test the GitHub package without installing globally:
 
 ```bash
-npx github:louchi1984-coder/deepseek-claude-code-worker-mcp#v0.3.20-beta.10 --doctor
+npx github:louchi1984-coder/deepseek-claude-code-worker-mcp#v0.3.20-beta.11 --doctor
 ```
 
 Configure the MCP client:
@@ -113,6 +118,23 @@ When npm publishing is available, the install command becomes:
 npm i -g deepseek-worker-mcp
 ```
 
+### If the user does not use Terminal
+
+Paste this into Codex Desktop and let Codex configure the local machine:
+
+```text
+Please install and configure this MCP for Codex Desktop:
+https://github.com/louchi1984-coder/deepseek-claude-code-worker-mcp
+
+Requirements:
+1. Install the MCP from GitHub.
+2. If Claude Code is missing, ask me for permission and install it.
+3. Run setup/doctor.
+4. If a DeepSeek key is missing, open an interactive setup so I can enter it.
+5. Write the MCP server entry to ~/.codex/config.toml.
+6. Tell me whether I need to restart Codex Desktop.
+```
+
 ## Requirements
 
 - Node.js 20+
@@ -152,6 +174,16 @@ setup prompts for a DeepSeek API key in the terminal and saves it to
 non-interactive MCP mode the server never prompts for secrets; it returns a clear
 doctor/error message instead.
 
+No DeepSeek key is bundled in this package. The published package only includes
+source files, scripts, README files, and the license. If setup does not ask for a
+key, it means one of these is already true:
+
+- `ANTHROPIC_AUTH_TOKEN` is set in the environment.
+- `DEEPSEEK_API_KEY_FILE` points to an existing key file.
+- `~/.codex/secrets/deepseek_api_key` already exists.
+- npm ran postinstall in a non-interactive context and printed manual next steps
+  instead of prompting.
+
 ## For Calling Agents
 
 For normal coding tasks, use the async worker with only `cwd` and `task`:
@@ -185,6 +217,7 @@ individual `get`, `tail`, or `wait` calls.
 
 Default rules for callers:
 
+- Remember the objective: save Codex main-thread tokens, not DeepSeek tokens.
 - Default division of labor: the host agent decides task boundaries, the
   DeepSeek worker executes one clearly scoped implementation task, and the host
   agent reviews `file_diffs`, `policy`, and `checks_run`.
@@ -218,6 +251,11 @@ Default rules for callers:
 - Pass `checks` when the validation command is obvious, such as `pnpm test` or
   `pnpm typecheck`.
 - Do not set `timeout_ms` unless the user explicitly wants a hard stop.
+
+Do not use the worker for everything. It is best for clear implementation tasks
+where the host agent can delegate once and review compact artifacts. Keep tiny
+one-line edits, unclear product/design discussions, and high-risk architectural
+decisions in the host conversation until the task boundary is clear.
 - Do not treat quiet output as failure. Check `process_alive`, `phase`,
   `observed_state`, `idle_seconds`, `pending_tool_use`, and
   `changed_files_so_far`.

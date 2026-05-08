@@ -6,6 +6,8 @@
 
 它的目标不是替代 Codex，而是降低 Codex 主对话在代码任务里的 token 消耗：Codex 负责确定任务边界、轮询状态和最终审查 diff/check，DeepSeek worker 负责单线程完成实现。对适合的代码任务，目标是减少约 40-60% 的 Codex 主线程 token 消耗。
 
+设计原则是：**省 Codex，不省 DeepSeek**。DeepSeek 可以多想、可以多跑一会儿；Codex 不应该在主线程里长时间读日志、反复探索代码、重写同一个补丁。
+
 它不是一个独立的 DeepSeek 客户端。项目内置了一个很小的 `claude-deepseek` 启动器：它会调用本机 Claude Code CLI，并把这次子进程请求切到 DeepSeek 的 Anthropic-compatible endpoint。
 
 ```text
@@ -38,7 +40,7 @@ MCP 宿主
 从 GitHub 安装：
 
 ```bash
-npm i -g github:louchi1984-coder/deepseek-claude-code-worker-mcp#v0.3.20-beta.10
+npm i -g github:louchi1984-coder/deepseek-claude-code-worker-mcp#v0.3.20-beta.11
 ```
 
 全局交互安装会自动运行 setup。setup 会检查 Claude Code，缺失时询问是否安装；如果没有 DeepSeek key，会提示输入并保存；最后打印 MCP 配置。非交互安装不会卡住 npm，只会打印手动下一步。
@@ -46,7 +48,7 @@ npm i -g github:louchi1984-coder/deepseek-claude-code-worker-mcp#v0.3.20-beta.10
 不想全局安装时，可以先用 npx 验证 GitHub 包能否拉起：
 
 ```bash
-npx github:louchi1984-coder/deepseek-claude-code-worker-mcp#v0.3.20-beta.10 --doctor
+npx github:louchi1984-coder/deepseek-claude-code-worker-mcp#v0.3.20-beta.11 --doctor
 ```
 
 MCP 配置：
@@ -90,6 +92,23 @@ npm run mcp:doctor
 npm i -g deepseek-worker-mcp
 ```
 
+### 用户不会用终端怎么办
+
+把下面这段直接发给 Codex Desktop，让 Codex 帮用户配置本机：
+
+```text
+请帮我安装并配置这个 MCP：
+https://github.com/louchi1984-coder/deepseek-claude-code-worker-mcp
+
+要求：
+1. 从 GitHub 安装 MCP
+2. 如果没有 Claude Code，请先征求我同意再安装
+3. 运行 setup/doctor
+4. 如果缺 DeepSeek key，请打开交互 setup，让我输入 key
+5. 写入 ~/.codex/config.toml
+6. 完成后告诉我是否需要重启 Codex Desktop
+```
+
 ## 依赖
 
 - Node.js 20+
@@ -113,6 +132,13 @@ npm i -g deepseek-worker-mcp
 - 如果没有 DeepSeek auth，提示输入 DeepSeek API key，并以用户只读权限保存
 
 MCP JSON-RPC 正常运行时不会弹交互，也不会在协议里询问 key。
+
+安装包里不会内置 DeepSeek key。发布包只包含源码、脚本、README 和 LICENSE。如果 setup 没问你 key，通常是下面几种情况之一：
+
+- 环境变量里已经有 `ANTHROPIC_AUTH_TOKEN`
+- `DEEPSEEK_API_KEY_FILE` 指向了已有 key 文件
+- `~/.codex/secrets/deepseek_api_key` 已经存在
+- npm postinstall 处在非交互环境，只打印下一步，不弹输入
 
 ## 给 Codex / 调用方的规则
 
@@ -141,6 +167,7 @@ MCP JSON-RPC 正常运行时不会弹交互，也不会在协议里询问 key。
 
 推荐分工：
 
+- 目标是省 Codex 主线程 token，不是省 DeepSeek token
 - Codex 主线程决定任务边界
 - DeepSeek worker 单线程完成一个明确实现任务
 - Codex 每隔约 90 秒看一次状态
@@ -157,6 +184,8 @@ MCP JSON-RPC 正常运行时不会弹交互，也不会在协议里询问 key。
 | `deepseek-v4-pro[1m]`, `docs_generation` | 5-10 分钟 |
 
 `deepseek_wait_for_job` 只是短前台 heartbeat。它不会杀 worker；没完成就返回 `running`，让调用方稍后继续看。
+
+不要把所有任务都交给 worker。它最适合边界清楚的实现任务：Codex 发一次任务，DeepSeek 执行，Codex 最后审紧凑产物。一两行小改动、需求还没想清楚的讨论、高风险架构判断，应该先留在 Codex 主线程里处理。
 
 ## 工具
 
