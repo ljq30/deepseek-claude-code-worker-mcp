@@ -52,6 +52,33 @@ writeFileSync(join(jobDir, "status.json"), JSON.stringify({
   forbiddenPaths: [],
   checks: [],
   allow_docs_only: false,
+  result: {
+    status: "failed",
+    files_changed: ["sample.js"],
+    file_diffs: [
+      {
+        path: "sample.js",
+        type: "modified",
+        unified_diff: "--- a/sample.js\n+++ b/sample.js\n",
+      },
+    ],
+    checks_run: [
+      {
+        command: "node --check sample.js",
+        exit_code: 1,
+        timed_out: false,
+        stdout_tail: "large stdout should be hidden by default",
+        stderr_tail: "large stderr should be hidden by default",
+      },
+    ],
+    worker: {
+      exit_code: 1,
+      timed_out: false,
+      cancelled: false,
+      stdout_tail: "large worker stdout should be hidden by default",
+      stderr_tail: "large worker stderr should be hidden by default",
+    },
+  },
 }, null, 2));
 writeFileSync(join(runningJobDir, "before-snapshot.json"), JSON.stringify([
   [
@@ -152,11 +179,12 @@ console.log(JSON.stringify({
   no_wait_reason: noWaitJob.reason,
   running_no_wait_status: runningNoWaitJob.status,
   running_no_wait_reason: runningNoWaitJob.reason,
-  default_get_has_logs: hasLogs(getJob),
-  default_get_has_events: hasEvents(getJob),
-  default_get_has_diffs: hasDiffs(getJob),
-  verbose_get_has_logs: hasLogs(verboseGetJob),
-  verbose_get_has_events: hasEvents(verboseGetJob),
+  default_get_has_logs: hasKeyDeep(getJob, "stdout_tail") || hasKeyDeep(getJob, "stderr_tail"),
+  default_get_has_events: hasKeyDeep(getJob, "recent_events"),
+  default_get_has_diffs: hasKeyDeep(getJob, "file_diffs"),
+  verbose_get_has_logs: hasKeyDeep(verboseGetJob, "stdout_tail") && hasKeyDeep(verboseGetJob, "stderr_tail"),
+  verbose_get_has_events: hasKeyDeep(verboseGetJob, "recent_events"),
+  verbose_get_has_diffs: hasKeyDeep(verboseGetJob, "file_diffs"),
   invalid_poll_error: invalidPoll.error?.message ?? null,
   changed_files: getJob.progress?.changed_files_so_far ?? [],
 }, null, 2));
@@ -171,11 +199,14 @@ if (
   || noWaitJob.reason !== "orphaned_after_mcp_restart"
   || runningNoWaitJob.status !== "running"
   || runningNoWaitJob.reason !== "no_wait_requested"
-  || hasLogs(getJob)
-  || hasEvents(getJob)
-  || hasDiffs(getJob)
-  || !hasLogs(verboseGetJob)
-  || !hasEvents(verboseGetJob)
+  || hasKeyDeep(getJob, "stdout_tail")
+  || hasKeyDeep(getJob, "stderr_tail")
+  || hasKeyDeep(getJob, "recent_events")
+  || hasKeyDeep(getJob, "file_diffs")
+  || !hasKeyDeep(verboseGetJob, "stdout_tail")
+  || !hasKeyDeep(verboseGetJob, "stderr_tail")
+  || !hasKeyDeep(verboseGetJob, "recent_events")
+  || !hasKeyDeep(verboseGetJob, "file_diffs")
   || invalidPoll.error?.message !== "poll_after_ms must be a positive number"
   || !getJob.progress?.changed_files_so_far?.includes("sample.js")
 ) {
@@ -191,16 +222,11 @@ function parseToolPayload(response) {
   return JSON.parse(text);
 }
 
-function hasLogs(payload) {
-  return payload.worker?.stdout_tail !== undefined || payload.worker?.stderr_tail !== undefined;
-}
-
-function hasEvents(payload) {
-  return payload.worker?.recent_events !== undefined;
-}
-
-function hasDiffs(payload) {
-  return payload.result?.file_diffs !== undefined;
+function hasKeyDeep(value, key) {
+  if (value == null || typeof value !== "object") return false;
+  if (Object.prototype.hasOwnProperty.call(value, key)) return true;
+  if (Array.isArray(value)) return value.some((item) => hasKeyDeep(item, key));
+  return Object.values(value).some((item) => hasKeyDeep(item, key));
 }
 
 function waitForResponseId(id, timeoutMs) {

@@ -1599,7 +1599,24 @@ function resultForOutput(result, options = {}) {
   if (options.include_diff) {
     output.file_diffs = result.file_diffs ?? [];
   }
-  return output;
+  return stripLargeEvidence(output, options);
+}
+
+function errorForOutput(error, options = {}) {
+  return stripLargeEvidence(error, options);
+}
+
+function stripLargeEvidence(value, options = {}) {
+  if (value == null || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map((item) => stripLargeEvidence(item, options));
+  const stripped = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (!options.include_logs && (key === "stdout_tail" || key === "stderr_tail")) continue;
+    if (!options.include_events && key === "recent_events") continue;
+    if (!options.include_diff && key === "file_diffs") continue;
+    stripped[key] = stripLargeEvidence(item, options);
+  }
+  return stripped;
 }
 
 function checksForOutput(checks, options = {}) {
@@ -1631,7 +1648,7 @@ function serializeJob(job, options = {}) {
     progress: progressForJob(job),
     worker: workerStatus(job, options),
     result: resultForOutput(job.result, options),
-    error: job.error,
+    error: errorForOutput(job.error, options),
     job_dir: job.job_dir,
   };
 }
@@ -1663,7 +1680,7 @@ async function waitForJob(args) {
       elapsed_wait_ms: Date.now() - started,
       progress: initialProgress,
       result: resultForOutput(job.result, options),
-      error: job.error,
+      error: errorForOutput(job.error, options),
       observations,
     };
   }
@@ -1680,7 +1697,7 @@ async function waitForJob(args) {
         elapsed_wait_ms: Date.now() - started,
         progress,
         result: resultForOutput(job.result, options),
-        error: job.error,
+        error: errorForOutput(job.error, options),
         observations,
         suggested_action: decision.suggested_action,
       };
@@ -1705,7 +1722,7 @@ async function waitForJob(args) {
     hit_foreground_cap: hitForegroundCap,
     progress,
     result: resultForOutput(job.result, options),
-    error: job.error,
+    error: errorForOutput(job.error, options),
     observations,
     suggested_action: !waitRequested
       ? "No foreground wait was requested. Worker is still running; poll with deepseek_get_job or deepseek_tail_job around next_poll.after_ms."
