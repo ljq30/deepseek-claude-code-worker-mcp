@@ -1037,6 +1037,9 @@ function bashPermissionDecision(command, config) {
 function filePermissionDecision(toolInput, config, { write }) {
   const file = toolInput.file_path ?? toolInput.path ?? toolInput.notebook_path ?? null;
   if (!file) return null;
+  if (write && config.worker_profile === "review") {
+    return denyPermission(`Write blocked by read-only review profile: ${file}`);
+  }
   const abs = resolve(config.cwd ?? process.cwd(), file);
   const forbidden = (config.forbidden_paths ?? []).some((path) => isInside(path, abs));
   if (forbidden) return denyPermission(`Access to forbidden path blocked: ${file}`);

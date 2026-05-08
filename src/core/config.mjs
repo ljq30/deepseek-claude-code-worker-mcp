@@ -80,14 +80,14 @@ export const WORKER_PROFILES = {
       "Worker profile: scoped_patch. Make only the requested narrow patch. Use the approved file tools and avoid Bash unless the caller explicitly approved a check.",
   },
   review: {
-    permission_mode: "acceptEdits",
+    permission_mode: "dontAsk",
     requires_allowed_dirs: false,
     read_only: true,
     prompt:
       "Worker profile: review. Prefer read-only inspection and report findings; do not edit unless the task explicitly requests a code change.",
   },
   debug_loop: {
-    permission_mode: "acceptEdits",
+    permission_mode: "dontAsk",
     requires_allowed_dirs: false,
     prompt:
       "Worker profile: debug_loop. Reproduce or inspect the failure path, make the smallest fix, and run requested checks.",
