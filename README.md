@@ -6,6 +6,10 @@ Coding-worker MCP for Codex Desktop. Codex plans, delegates, and reviews; DeepSe
 
 Goal: **save Codex main-thread tokens, not DeepSeek tokens**. For suitable coding tasks, the intended workflow can reduce Codex main-thread token usage by about 40-60%.
 
+## Current Beta
+
+Current GitHub beta tag: `v0.3.20-beta.36`.
+
 ## What It Does
 
 - Runs real coding work with DeepSeek V4 through Claude Code
@@ -30,7 +34,7 @@ GitHub / no global install:
     "deepseek-code-worker": {
       "command": "npx",
       "args": [
-        "github:louchi1984-coder/deepseek-claude-code-worker-mcp#v0.3.20-beta.35"
+        "github:louchi1984-coder/deepseek-claude-code-worker-mcp#v0.3.20-beta.36"
       ]
     }
   }
@@ -63,14 +67,14 @@ Source-mode MCP config:
 Check a GitHub tag without installing:
 
 ```bash
-npx github:louchi1984-coder/deepseek-claude-code-worker-mcp#v0.3.20-beta.35 --doctor
+npx github:louchi1984-coder/deepseek-claude-code-worker-mcp#v0.3.20-beta.36 --doctor
 ```
 
 Expected shape:
 
 ```json
 {
-  "server_version": "0.3.20-beta.35",
+  "server_version": "0.3.20-beta.36",
   "ok": true
 }
 ```
@@ -141,7 +145,11 @@ Rules:
 
 - Codex defines the task boundary
 - DeepSeek worker performs one implementation task
-- Codex reads compact status and reviews diff/checks after terminal status
+- Codex asks MCP for status only when it needs facts about the worker
+- MCP reports observed facts: process state, changed files, diffs, checks, forbidden-path touches, and errors
+- Claude Code hooks record compact tool-action summaries when available
+- MCP does not suggest poll intervals, decide that quiet means stuck, or tell Codex when to take over
+- Codex reviews diff/checks after terminal status
 - One clear implementation task should map to one worker. Do not start a second
   worker for the same task while the first job is still running.
 - If a follow-up worker is needed after terminal status, include the previous
@@ -166,7 +174,13 @@ Large evidence is opt-in:
 - `include_events: true`
 - `include_diff: true`
 
+Default status output is intentionally small. It does not include poll hints, `suggested_action`, semantic state labels, pending-tool debug fields, or Claude argument previews.
+
+The local build records Claude Code hook summaries in `tool-events.jsonl` inside each job directory. Default status exposes only a tiny `tool_activity` summary. Full hook/stream details require `include_events: true`. Hook summaries intentionally omit file contents, edit old/new strings, and full command output.
+
 ## Use Cases
+
+Model selection is core know-how for this MCP: use cheaper/faster `deepseek-v4-flash` for ordinary implementation by default; switch to `deepseek-v4-pro[1m]` only when the task needs broad context, a debugging loop, complex reasoning, or multi-step agentic coding. The goal is to save Codex main-thread tokens, not DeepSeek tokens.
 
 | `use_case` | Default model | effort | Best for |
 | --- | --- | --- | --- |
@@ -182,12 +196,22 @@ Large evidence is opt-in:
 
 Explicit `model`, `thinking`, or `reasoning_effort` values override the preset.
 
+Selection rules:
+
+- Use `auto` by default
+- Use `fast_patch` for obviously tiny edits
+- Use `scaffold_or_tests` for tests, scaffolding, and glue code
+- Use `debug_loop` for reproduce, locate, fix, and validate work
+- Use the Pro[1m] presets for cross-file implementation, complex logic, or broad codebase context
+- Do not default to Pro[1m] just because it sounds stronger; also do not make Codex read the whole codebase before delegating
+
 ## Permission Boundary
 
 This MCP is not an OS/container sandbox. Its guardrails are:
 
 - temporary Claude Code `dontAsk` settings per worker
-- a `PreToolUse` hook for clearly dangerous Bash, forbidden paths, and out-of-scope writes
+- a `PreToolUse` hook for clearly dangerous Bash, forbidden paths, and direct out-of-scope writes
+- Claude Code hooks for compact action logs
 - final workspace snapshot policy checks
 
 Default `safety_mode` is `permissive`: Bash is allowed except clearly dangerous commands. Use `safety_mode: "safe"` to restrict Bash to read-only locator commands and explicit checks.
@@ -195,6 +219,8 @@ Default `safety_mode` is `permissive`: Bash is allowed except clearly dangerous 
 `bypassPermissions` is disabled by default. Keep it off unless you add a real sandbox outside this MCP.
 
 Use `worker_profile: "scoped_patch"` with narrow `allowed_dirs` for tightly scoped patches.
+
+Version `0.3.20-beta.36` principle: report actions, do not adjudicate. `allowed_dirs` changes outside the target scope are reported as facts, not automatically treated as failed work. `forbidden_paths` remains a hard failure. `allow_docs_only` is kept only for compatibility with older calls; documentation changes are reported and no longer fail just because they are docs-only.
 
 ## Verification
 

@@ -2,15 +2,13 @@ import { dirname, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
-export const SERVER_VERSION = "0.3.20-beta.35";
+export const SERVER_VERSION = "0.3.20-beta.36";
 export const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 export const SELF_SCRIPT = resolve(process.argv[1] ?? "deepseek-worker-mcp.mjs");
 export const DEFAULT_CLAUDE_DEEPSEEK = resolve(PACKAGE_ROOT, "bin/claude-deepseek.mjs");
 export const DEFAULT_SYNC_TIMEOUT_MS = 10 * 60 * 1000;
 export const DEFAULT_CHECK_TIMEOUT_MS = 10 * 60 * 1000;
-export const DEFAULT_POLL_AFTER_MS = 90 * 1000;
 export const DEFAULT_FOREGROUND_WAIT_CAP_MS = 10 * 60 * 1000;
-export const DEEP_THINKING_POLL_AFTER_MS = 2 * 60 * 1000;
 export const DEEP_THINKING_IDLE_AFTER_MS = 90 * 1000;
 export const DEFAULT_IDLE_AFTER_MS = 45 * 1000;
 export const DEFAULT_QUIET_AFTER_TOOL_USE_WITHOUT_RESULT_MS = 4 * 60 * 1000;
@@ -111,7 +109,6 @@ export const USE_CASES = {
     model: "deepseek-v4-flash",
     thinking: "enabled",
     reasoning_effort: "max",
-    poll_after_ms: DEFAULT_POLL_AFTER_MS,
     idle_after_ms: DEFAULT_IDLE_AFTER_MS,
     verification_profile: "smoke",
     output_format: "stream-json",
@@ -122,7 +119,6 @@ export const USE_CASES = {
     model: "deepseek-v4-flash",
     thinking: "disabled",
     reasoning_effort: "high",
-    poll_after_ms: 30 * 1000,
     idle_after_ms: DEFAULT_IDLE_AFTER_MS,
     verification_profile: "smoke",
     output_format: "stream-json",
@@ -133,7 +129,6 @@ export const USE_CASES = {
     model: "deepseek-v4-flash",
     thinking: "enabled",
     reasoning_effort: "high",
-    poll_after_ms: DEFAULT_POLL_AFTER_MS,
     idle_after_ms: DEFAULT_IDLE_AFTER_MS,
     verification_profile: "standard",
     output_format: "stream-json",
@@ -144,7 +139,6 @@ export const USE_CASES = {
     model: "deepseek-v4-flash",
     thinking: "enabled",
     reasoning_effort: "high",
-    poll_after_ms: DEFAULT_POLL_AFTER_MS,
     idle_after_ms: DEFAULT_IDLE_AFTER_MS,
     verification_profile: "standard",
     output_format: "stream-json",
@@ -155,7 +149,6 @@ export const USE_CASES = {
     model: "deepseek-v4-pro[1m]",
     thinking: "enabled",
     reasoning_effort: "max",
-    poll_after_ms: DEEP_THINKING_POLL_AFTER_MS,
     idle_after_ms: DEEP_THINKING_IDLE_AFTER_MS,
     requires_review: true,
     verification_profile: "debug",
@@ -167,7 +160,6 @@ export const USE_CASES = {
     model: "deepseek-v4-pro[1m]",
     thinking: "enabled",
     reasoning_effort: "max",
-    poll_after_ms: DEEP_THINKING_POLL_AFTER_MS,
     idle_after_ms: DEEP_THINKING_IDLE_AFTER_MS,
     requires_review: true,
     verification_profile: "standard",
@@ -179,7 +171,6 @@ export const USE_CASES = {
     model: "deepseek-v4-pro[1m]",
     thinking: "enabled",
     reasoning_effort: "max",
-    poll_after_ms: DEEP_THINKING_POLL_AFTER_MS,
     idle_after_ms: DEEP_THINKING_IDLE_AFTER_MS,
     requires_review: true,
     verification_profile: "review",
@@ -191,7 +182,6 @@ export const USE_CASES = {
     model: "deepseek-v4-pro[1m]",
     thinking: "enabled",
     reasoning_effort: "max",
-    poll_after_ms: DEEP_THINKING_POLL_AFTER_MS,
     idle_after_ms: DEEP_THINKING_IDLE_AFTER_MS,
     requires_review: true,
     verification_profile: "review",
@@ -203,7 +193,6 @@ export const USE_CASES = {
     model: "deepseek-v4-pro[1m]",
     thinking: "enabled",
     reasoning_effort: "high",
-    poll_after_ms: DEEP_THINKING_POLL_AFTER_MS,
     idle_after_ms: DEEP_THINKING_IDLE_AFTER_MS,
     allow_docs_only: true,
     verification_profile: "docs",

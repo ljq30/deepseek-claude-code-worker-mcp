@@ -28,7 +28,6 @@ import {
   DEFAULT_FOREGROUND_WAIT_CAP_MS,
   DEFAULT_IDLE_AFTER_MS,
   DEFAULT_IGNORED_DIRS,
-  DEFAULT_POLL_AFTER_MS,
   DEFAULT_REASONING_EFFORT,
   DEFAULT_SYNC_TIMEOUT_MS,
   JOB_ROOT,
@@ -82,7 +81,7 @@ const tools = [
     name: "deepseek_start_implementation",
     title: "Start DeepSeek worker job",
     description:
-      "Start one async DeepSeek V4 coding worker for one clearly scoped implementation task and return a job_id immediately. Best default: the host agent defines the task boundary, this worker edits/checks files, and the host reviews terminal diff/policy/checks. Do not start a second worker for the same task while the first job is running; poll compact status with deepseek_get_job. If a follow-up worker is needed after terminal status, include the previous job_id, terminal status, failure/check result, and current diff summary in the new task. Do not request logs/events/diffs while running unless debugging. Default auto use_case uses reasoning_effort=max.",
+      "Start one async DeepSeek V4 coding worker for one clearly scoped implementation task and return a job_id immediately. Best default: the host agent defines the task boundary, this worker edits/checks files, and the host reviews terminal diff/policy/checks. Do not start a second worker for the same task while the first job is running. If a follow-up worker is needed after terminal status, include the previous job_id, terminal status, failure/check result, and current diff summary in the new task. Do not request logs/events/diffs while running unless debugging. Default auto use_case uses reasoning_effort=max.",
     annotations: {
       readOnlyHint: false,
       destructiveHint: true,
@@ -96,7 +95,7 @@ const tools = [
     name: "deepseek_get_job",
     title: "Read DeepSeek worker status",
     description:
-      "Read compact status/result for a DeepSeek worker job. This is the default polling tool. By default it omits stdout/stderr, stream events, and per-file diffs to save host tokens. While status is running, use returned progress/suggested_action only; review file_diffs, policy, and checks_run after terminal status.",
+      "Read compact status/result for a DeepSeek worker job. By default it returns only short factual state and omits stdout/stderr, stream events, per-file diffs, and tool-call debug details to save host tokens. Use include_* flags only for debugging or final review.",
     annotations: {
       readOnlyHint: true,
       destructiveHint: false,
@@ -120,7 +119,7 @@ const tools = [
     name: "deepseek_tail_job",
     title: "Read DeepSeek worker tail",
     description:
-      "Return compact running-job progress and files changed so far. Use for lightweight status views, not full review. Logs/events are opt-in and should stay disabled during normal running-state polling to save host tokens.",
+      "Return compact running-job progress and files changed so far. Logs/events are opt-in and should stay disabled unless debugging.",
     annotations: {
       readOnlyHint: true,
       destructiveHint: false,
@@ -161,14 +160,14 @@ const tools = [
         },
         poll_interval_ms: {
           type: "number",
-          description: "Polling interval while observing. Defaults to the job's recommended poll interval.",
+          description: "Internal observation interval while this tool call is waiting. This does not control the worker lifetime.",
         },
         include_logs: { type: "boolean", description: "Include stdout/stderr tails if the job reaches a terminal state. Defaults to false." },
         include_events: { type: "boolean", description: "Include recent stream-json events. Defaults to false." },
         include_diff: { type: "boolean", description: "Include per-file unified diffs if the job reaches a terminal state. Defaults to false." },
         quiet_with_changes_ms: {
           type: "number",
-          description: "Deprecated compatibility field. Running jobs are not marked needs_review by quiet time.",
+          description: "Deprecated compatibility field. Ignored.",
         },
       },
       required: ["job_id"],
@@ -527,8 +526,6 @@ async function callTool(params) {
       ...progressForJob(job),
       worker: workerStatus(job, outputOptions(args)),
       job_dir: job.job_dir,
-      recommended_poll_after_ms: recommendedPollAfterMs(job),
-      next_poll: nextPollHint(job),
     });
   }
 
@@ -617,7 +614,6 @@ function restoreJob(jobId) {
     started_at: data.started_at ?? null,
     started_ms: restoreStartedMs(data),
     updated_at: new Date().toISOString(),
-    recommended_poll_after_ms: data.recommended_poll_after_ms ?? DEFAULT_POLL_AFTER_MS,
     cwd: data.cwd ?? null,
     before: deserializeSnapshot(data.before ?? readJsonIfExists(join(jobDir, "before-snapshot.json"))),
     ignored_dirs: new Set([...DEFAULT_IGNORED_DIRS, ...arrayOfStrings(data.ignored_dirs)]),
@@ -690,7 +686,6 @@ function createJob(jobId, jobDir, prepared) {
     started_at: now,
     started_ms: Date.now(),
     updated_at: now,
-    recommended_poll_after_ms: prepared.args.poll_after_ms,
     cwd: prepared.cwd,
     before: prepared.before,
     ignored_dirs: prepared.args.ignored_dirs,
@@ -792,9 +787,6 @@ function startedJobResult(job, prepared) {
     phase: job.phase,
     phase_message: job.phase_message,
     output_format: job.output_format,
-    claude_args_preview: job.claude_args_preview,
-    recommended_poll_after_ms: recommendedPollAfterMs(job),
-    next_poll: nextPollHint(job),
   };
 }
 
@@ -939,11 +931,6 @@ function normalizeArgs(args, options = {}) {
     args.timeout_ms,
     options.sync ? DEFAULT_SYNC_TIMEOUT_MS : null
   );
-  const poll_after_ms = positiveNumber(
-    args.poll_after_ms,
-    preset.poll_after_ms ?? DEFAULT_POLL_AFTER_MS,
-    "poll_after_ms"
-  );
   const idle_after_ms = Number(args.idle_after_ms ?? preset.idle_after_ms ?? DEFAULT_IDLE_AFTER_MS);
   const allowed_dirs = arrayOfStrings(args.allowed_dirs);
   const forbidden_paths = arrayOfStrings(args.forbidden_paths).length > 0
@@ -973,7 +960,6 @@ function normalizeArgs(args, options = {}) {
     ignored_dirs: new Set([...DEFAULT_IGNORED_DIRS, ...arrayOfStrings(args.ignored_dirs)]),
     timeout_ms,
     check_timeout_ms: Number(args.check_timeout_ms ?? DEFAULT_CHECK_TIMEOUT_MS),
-    poll_after_ms,
     idle_after_ms,
     allow_docs_only,
     claude_deepseek_bin: args.claude_deepseek_bin || process.env.CLAUDE_DEEPSEEK_BIN || DEFAULT_CLAUDE_DEEPSEEK,
@@ -1072,7 +1058,26 @@ function buildClaudeSettings(args, cwd) {
           ],
         },
       ],
+      PostToolUse: [toolActivityHook()],
+      PostToolUseFailure: [toolActivityHook()],
+      PostToolBatch: [toolActivityHook()],
+      PermissionRequest: [toolActivityHook()],
+      PermissionDenied: [toolActivityHook()],
+      Stop: [toolActivityHook()],
+      StopFailure: [toolActivityHook()],
     },
+  };
+}
+
+function toolActivityHook() {
+  return {
+    matcher: "*",
+    hooks: [
+      {
+        type: "command",
+        command: `${JSON.stringify(process.execPath)} ${JSON.stringify(SELF_SCRIPT)} --permission-hook`,
+      },
+    ],
   };
 }
 
@@ -1085,6 +1090,9 @@ function permissionPathPattern(path) {
 async function runPermissionHook() {
   const input = JSON.parse(await readStdin());
   const config = JSON.parse(process.env.DEEPSEEK_WORKER_HOOK_CONFIG ?? "{}");
+  appendToolActivity(input, config);
+  const hookEventName = input.hook_event_name ?? input.event ?? "PreToolUse";
+  if (hookEventName !== "PreToolUse") return;
   const decision = permissionDecision(input, config);
   if (!decision) return;
   process.stdout.write(`${JSON.stringify({
@@ -1167,6 +1175,66 @@ function allowPermission() {
 
 function denyPermission(reason) {
   return { decision: "deny", reason };
+}
+
+function appendToolActivity(input, config) {
+  if (!config.tool_events_path) return;
+  const event = summarizeHookInput(input, config);
+  if (!event) return;
+  try {
+    appendFileSync(config.tool_events_path, `${JSON.stringify(event)}\n`);
+  } catch {
+    // Hook logging must never block Claude Code tool execution.
+  }
+}
+
+function summarizeHookInput(input, config = {}) {
+  if (!input || typeof input !== "object") return null;
+  const event = input.hook_event_name ?? input.event ?? "unknown";
+  const tool = input.tool_name ?? input.tool?.name ?? null;
+  const summary = {
+    at: new Date().toISOString(),
+    event,
+    tool_name: tool,
+  };
+  const toolInput = input.tool_input && typeof input.tool_input === "object" ? input.tool_input : {};
+  if (tool === "Bash") {
+    summary.command = summarizeCommand(toolInput.command);
+  } else {
+    const path = firstString(toolInput.file_path, toolInput.path, toolInput.notebook_path);
+    if (path) summary.path = displayPath(path, config.cwd);
+    const pattern = firstString(toolInput.pattern, toolInput.regex);
+    if (pattern) summary.pattern = truncateValue(pattern, 120);
+  }
+  const response = input.tool_response && typeof input.tool_response === "object" ? input.tool_response : null;
+  if (response) {
+    if (typeof response.duration_ms === "number") summary.duration_ms = response.duration_ms;
+    if (typeof response.exit_code === "number") summary.exit_code = response.exit_code;
+    if (typeof response.success === "boolean") summary.success = response.success;
+  }
+  if (typeof input.duration_ms === "number") summary.duration_ms = input.duration_ms;
+  if (typeof input.error === "string") summary.error = truncateValue(input.error, 240);
+  if (input.error && typeof input.error.message === "string") summary.error = truncateValue(input.error.message, 240);
+  return summary;
+}
+
+function firstString(...values) {
+  return values.find((value) => typeof value === "string" && value.length > 0) ?? null;
+}
+
+function displayPath(path, cwd) {
+  const abs = resolve(cwd ?? process.cwd(), path);
+  const rel = cwd ? normalizeRel(relative(cwd, abs)) : path;
+  return rel && !rel.startsWith("..") ? rel : path;
+}
+
+function summarizeCommand(command) {
+  if (typeof command !== "string") return null;
+  return truncateValue(command.replace(/\s+/g, " ").trim(), 240);
+}
+
+function truncateValue(value, max) {
+  return value.length > max ? `${value.slice(0, max - 1)}…` : value;
 }
 
 function readStdin() {
@@ -1279,6 +1347,7 @@ async function runClaudeDeepSeek({ cwd, prompt, timeout_ms, claude_deepseek_bin,
       checks: job?.checks ?? [],
       worker_profile: job?.worker_profile ?? null,
       safety_mode: job?.safety_mode ?? "permissive",
+      tool_events_path: job?.job_dir ? join(job.job_dir, "tool-events.jsonl") : null,
     });
   }
   const processInvocation = nodeScriptInvocation(resolvedClaudeDeepSeekBin, invocation.args);
@@ -1502,10 +1571,7 @@ function evaluatePolicy({ cwd, changedFiles, allowedRoots, forbiddenPaths, allow
     return forbiddenPaths.some((forbidden) => abs === forbidden || isInside(forbidden, abs));
   });
   const docs_only = changedFiles.length > 0 && changedFiles.every(isDocPath);
-  const ok = changedFiles.length > 0
-    && outside_allowed.length === 0
-    && forbidden_changed.length === 0
-    && (allow_docs_only || !docs_only);
+  const ok = changedFiles.length > 0 && forbidden_changed.length === 0;
   return {
     ok,
     outside_allowed,
@@ -1532,9 +1598,7 @@ function failureReason({ changedFiles, policy, checkFailures, worker }) {
   if (worker.timed_out && changedFiles.length === 0) return "caller_timeout_no_valid_changes";
   if (worker.exit_code !== 0 && !worker.timed_out && !worker.cancelled) return "worker_exit_nonzero";
   if (changedFiles.length === 0) return "no_code_changed";
-  if (policy.outside_allowed.length > 0) return "changed_outside_allowed_paths";
   if (policy.forbidden_changed.length > 0) return "changed_forbidden_paths";
-  if (policy.docs_only && !policy.allow_docs_only) return "docs_only_change";
   if (checkFailures.length > 0) return "checks_failed";
   if (worker.cancelled) return "cancelled_after_valid_changes";
   if (worker.timed_out) return "caller_timeout_after_valid_changes";
@@ -1603,23 +1667,63 @@ function outputOptions(args = {}) {
 function workerStatus(job, options = {}) {
   const worker = {
     output_format: job.output_format,
-    last_event_at: job.last_event_at,
-    last_event_type: job.last_event_type,
-    last_event_summary: job.last_event_summary,
-    last_successful_tool: job.last_successful_tool ?? null,
-    last_failed_tool: job.last_failed_tool ?? null,
     last_error_kind: job.last_error_kind ?? null,
-    tool_calls_since_last_change: job.tool_calls_since_last_change ?? 0,
+    tool_activity: toolActivitySummary(job),
   };
   if (options.include_logs) {
     worker.claude_args_preview = job.claude_args_preview ?? null;
     worker.stdout_tail = tail(job.stdout ?? "");
     worker.stderr_tail = tail(job.stderr ?? "");
+    worker.last_successful_tool = job.last_successful_tool ?? null;
+    worker.last_failed_tool = job.last_failed_tool ?? null;
+    worker.tool_calls_since_last_change = job.tool_calls_since_last_change ?? 0;
   }
   if (options.include_events) {
+    worker.last_event_at = job.last_event_at;
+    worker.last_event_type = job.last_event_type;
+    worker.last_event_summary = job.last_event_summary;
     worker.recent_events = job.stream_events ?? [];
+    worker.tool_events = readToolEvents(job).slice(-50);
   }
   return worker;
+}
+
+function toolActivitySummary(job) {
+  const events = readToolEvents(job);
+  const counts = {};
+  for (const event of events) {
+    const key = event.tool_name || event.event || "unknown";
+    counts[key] = (counts[key] ?? 0) + 1;
+  }
+  const last = events.at(-1) ?? null;
+  return {
+    total_events: events.length,
+    last_event: last ? {
+      event: last.event ?? null,
+      tool_name: last.tool_name ?? null,
+      path: last.path ?? null,
+      command: last.command ?? null,
+      exit_code: last.exit_code ?? null,
+      success: last.success ?? null,
+    } : null,
+    counts,
+  };
+}
+
+function readToolEvents(job) {
+  if (!job?.job_dir) return [];
+  const text = readTextIfExists(join(job.job_dir, "tool-events.jsonl"));
+  if (!text.trim()) return [];
+  const events = [];
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    try {
+      events.push(JSON.parse(line));
+    } catch {
+      // Ignore partial hook log lines.
+    }
+  }
+  return events;
 }
 
 function resultForOutput(result, options = {}) {
@@ -1690,8 +1794,6 @@ function serializeJob(job, options = {}) {
     preset_requires_review: job.preset_requires_review,
     permission_mode: job.permission_mode,
     restored_from_disk: Boolean(job.restored_from_disk),
-    recommended_poll_after_ms: recommendedPollAfterMs(job),
-    next_poll: nextPollHint(job),
     progress: progressForJob(job),
     worker: workerStatus(job, options),
     result: resultForOutput(job.result, options),
@@ -1712,7 +1814,7 @@ async function waitForJob(args) {
     ? positiveNumber(args.max_wait_ms, DEFAULT_FOREGROUND_WAIT_CAP_MS, "max_wait_ms")
     : 0;
   const maxWaitMs = Math.min(requestedMaxWaitMs, DEFAULT_FOREGROUND_WAIT_CAP_MS);
-  const defaultPoll = Math.min(job.recommended_poll_after_ms ?? DEFAULT_POLL_AFTER_MS, 30 * 1000);
+  const defaultPoll = 30 * 1000;
   const pollIntervalMs = positiveNumber(args.poll_interval_ms, defaultPoll, "poll_interval_ms");
   const started = Date.now();
   const observations = [];
@@ -1746,7 +1848,6 @@ async function waitForJob(args) {
         result: resultForOutput(job.result, options),
         error: errorForOutput(job.error, options),
         observations,
-        suggested_action: decision.suggested_action,
       };
     }
     const remainingMs = maxWaitMs - (Date.now() - started);
@@ -1771,11 +1872,6 @@ async function waitForJob(args) {
     result: resultForOutput(job.result, options),
     error: errorForOutput(job.error, options),
     observations,
-    suggested_action: !waitRequested
-      ? "No foreground wait was requested. Worker is still running; use deepseek_get_job for compact status later if needed."
-      : hitForegroundCap
-      ? "Foreground observation cap elapsed before caller max_wait_ms. Worker is still running; use deepseek_get_job for compact status later if needed."
-      : "Observation window elapsed. Worker is still running; do not cancel or review artifacts solely because of quiet/elapsed time.",
   };
 }
 
@@ -1784,30 +1880,24 @@ function waitDecision(job) {
     return {
       status: "completed",
       reason: "job_completed",
-      suggested_action: job.result?.requires_review
-        ? "inspect files_changed, policy, and checks_run before accepting"
-        : "use result.files_changed and checks_run as final status",
     };
   }
   if (job.status === "failed") {
     return {
       status: "failed",
       reason: "job_failed",
-      suggested_action: "inspect failure_reason, policy, and checks_run; request include_logs only when debugging needs worker logs",
     };
   }
   if (job.status === "cancel_requested") {
     return {
       status: "cancel_requested",
       reason: "job_cancel_requested",
-      suggested_action: "wait again for artifact review to complete",
     };
   }
   if (job.status === "orphaned") {
     return {
-      status: "needs_review",
+      status: "orphaned",
       reason: "orphaned_after_mcp_restart",
-      suggested_action: "job was restored from disk but no live worker process exists; inspect changed_files_so_far, logs, policy_so_far, and local files before trusting artifacts",
     };
   }
   return null;
@@ -1818,19 +1908,8 @@ function compactProgress(progress) {
     at: new Date().toISOString(),
     status: progress.status,
     phase: progress.phase,
-    observed_state: progress.observed_state,
-    idle_seconds: progress.idle_seconds,
     change_count_so_far: progress.change_count_so_far ?? 0,
-    last_event_summary: progress.last_event_summary,
-    last_stream_kind: progress.last_stream_kind,
-    pending_tool_use: progress.pending_tool_use,
-    streaming_tool_input: progress.streaming_tool_input,
-    pending_tool_duration_ms: progress.pending_tool_duration_ms,
-    pending_tool_duration_seconds: progress.pending_tool_duration_seconds,
-    last_successful_tool: progress.last_successful_tool,
-    last_failed_tool: progress.last_failed_tool,
     last_error_kind: progress.last_error_kind,
-    tool_calls_since_last_change: progress.tool_calls_since_last_change,
   };
 }
 
@@ -1853,17 +1932,11 @@ function progressForJob(job) {
     return {
       status: job.status,
       phase: job.phase ?? job.status,
-      phase_message: statusMessage(job, idle),
-      observed_state: observedState(job, idle, []),
-      suggested_action: suggestedAction(job, idle, []),
+      phase_message: job.phase_message ?? null,
       process_alive: Boolean(job.process_alive),
       process_pid: job.process_pid ?? null,
-      last_event_summary: job.last_event_summary ?? null,
       last_stream_kind: job.last_stream_kind ?? null,
-      pending_tool_use: job.pending_tool_use ?? null,
-      streaming_tool_input: job.streaming_tool_input ?? null,
-      ...pendingToolDuration(job),
-      last_tool_name: job.last_tool_name ?? null,
+      last_error_kind: job.last_error_kind ?? null,
       ...idle,
     };
   }
@@ -1882,26 +1955,11 @@ function progressForJob(job) {
   return {
     status: job.status,
     phase: job.phase ?? job.status,
-    phase_message: statusMessage(job, idle),
-    observed_state: observedState(job, idle, changedFiles),
-    suggested_action: suggestedAction(job, idle, changedFiles),
+    phase_message: job.phase_message ?? null,
     process_alive: Boolean(job.process_alive),
     process_pid: job.process_pid ?? null,
-    last_event_summary: job.last_event_summary ?? null,
     last_stream_kind: job.last_stream_kind ?? null,
-    pending_tool_use: job.pending_tool_use ?? null,
-    streaming_tool_input: job.streaming_tool_input ?? null,
-    last_tool_input_at: job.last_tool_input_at ?? null,
-    last_tool_input_completed_at: job.last_tool_input_completed_at ?? null,
-    ...pendingToolDuration(job),
-    last_tool_name: job.last_tool_name ?? null,
-    last_tool_use_at: job.last_tool_use_at ?? null,
-    last_tool_result_at: job.last_tool_result_at ?? null,
-    last_tool_result_inferred: Boolean(job.last_tool_result_inferred),
-    last_successful_tool: job.last_successful_tool ?? null,
-    last_failed_tool: job.last_failed_tool ?? null,
     last_error_kind: job.last_error_kind ?? null,
-    tool_calls_since_last_change: job.tool_calls_since_last_change ?? 0,
     elapsed_ms: Date.now() - job.started_ms,
     ...idle,
     changed_files_so_far: changedFiles,
@@ -1919,10 +1977,6 @@ function progressForJob(job) {
       job,
     }),
   };
-}
-
-function recommendedPollAfterMs(job) {
-  return Number(job?.recommended_poll_after_ms ?? DEFAULT_POLL_AFTER_MS);
 }
 
 function pendingToolDuration(job, now = Date.now()) {
@@ -1943,21 +1997,6 @@ function pendingToolDuration(job, now = Date.now()) {
   return {
     pending_tool_duration_ms: durationMs,
     pending_tool_duration_seconds: Math.floor(durationMs / 1000),
-  };
-}
-
-function nextPollHint(job) {
-  if (!job || job.status !== "running") {
-    return {
-      after_ms: null,
-      preferred_tool: "deepseek_get_job",
-      instruction: "Job is not running; inspect terminal result instead of polling.",
-    };
-  }
-  return {
-    after_ms: recommendedPollAfterMs(job),
-    preferred_tool: "deepseek_get_job",
-    instruction: "Optional compact status-check hint. Do not treat this as a timeout, watchdog, or instruction to keep polling indefinitely.",
   };
 }
 
@@ -1986,65 +2025,11 @@ function updateToolChangeCounters(job, changeCount) {
 function idleStatus(job) {
   const reference = job.last_output_at_ms ?? job.started_ms ?? Date.now();
   const idleMs = Date.now() - reference;
-  const threshold = job.idle_after_ms ?? DEFAULT_IDLE_AFTER_MS;
   return {
     last_output_at: job.last_output_at ?? null,
     idle_ms: idleMs,
     idle_seconds: Math.floor(idleMs / 1000),
-    quiet: idleMs >= threshold,
-    quiet_threshold_ms: threshold,
-    quiet_is_cancellation_signal: false,
-    quiet_guidance: "Quiet output is observational only. Do not cancel, restart, take over, or review partial artifacts solely because this value is true.",
   };
-}
-
-function statusMessage(job, idle = idleStatus(job)) {
-  if (job.status === "cancel_requested") return "Cancellation requested; waiting for the worker process to stop.";
-  if (job.status === "completed") return "Completed successfully.";
-  if (job.status === "failed") return "Finished with failure; inspect result.failure_reason and worker logs.";
-  if (job.phase === "caller_timeout") return job.phase_message;
-  if (job.phase === "model_running" && idle.quiet && job.process_alive) {
-    return `${job.phase_message} Process is alive but has produced no output for ${idle.idle_seconds}s. This is inconclusive, not proof of a hang.`;
-  }
-  return job.phase_message ?? "Worker status is available.";
-}
-
-function observedState(job, idle, changedFiles) {
-  if (job.status === "orphaned") return "orphaned_after_mcp_restart";
-  if (job.status === "completed") return "completed";
-  if (job.status === "failed") return "failed";
-  if (job.status === "cancel_requested") return "cancel_requested";
-  if (!job.process_alive && job.status === "running") return "process_not_alive";
-  if (job.process_alive && job.streaming_tool_input) return "alive_streaming_tool_input";
-  if (job.process_alive && job.pending_tool_use && changedFiles.length === 0 && idle.quiet) return "alive_quiet_after_tool_use";
-  if (job.process_alive && changedFiles.length > 0 && idle.quiet) return "alive_quiet_with_workspace_changes";
-  if (job.process_alive && changedFiles.length > 0) return "alive_with_workspace_changes";
-  if (job.process_alive && job.last_stream_kind === "thinking_delta") return "alive_thinking_streaming";
-  if (job.process_alive && job.last_event_at_ms && !idle.quiet) return "alive_recent_stream_event";
-  if (job.process_alive && idle.quiet) return "alive_quiet_no_recent_output";
-  if (job.process_alive) return "alive_recent_output_or_startup";
-  return "unknown";
-}
-
-function suggestedAction(job, idle, changedFiles) {
-  if (job.status === "orphaned") return "job restored from disk without a live worker process; inspect artifacts and decide whether to rerun";
-  if (job.status === "completed") return "inspect result and checks_run";
-  if (job.status === "failed") return "inspect failure_reason, policy, checks_run, and worker logs";
-  if (job.status === "cancel_requested") return "wait for artifact review after cancellation";
-  if (job.process_alive && job.streaming_tool_input) {
-    return "Claude Code is still streaming tool input JSON; this is model/tool-call generation, not a submitted tool waiting for result";
-  }
-  if (job.process_alive && job.pending_tool_use && changedFiles.length === 0 && idle.quiet) {
-    return "worker is alive and quiet after a submitted tool call; Claude Code stream-json may omit explicit tool_result, so check for later message_start, file changes, or terminal result before treating it as stuck";
-  }
-  if (job.process_alive && changedFiles.length > 0 && idle.quiet) {
-    return "worker is alive and quiet after producing files; do not review partial artifacts or cancel solely because of quiet time";
-  }
-  if (job.process_alive && changedFiles.length > 0) return "monitor until completion; changed files are provisional while the worker is running";
-  if (job.process_alive && job.last_stream_kind === "thinking_delta") return "worker is still running and recently streamed thinking activity";
-  if (job.process_alive && idle.quiet) return "worker is still running; quiet alive process is inconclusive";
-  if (job.process_alive) return "worker is still running";
-  return "inspect job result or error";
 }
 
 function recordClaudeEvent(job, event, summary) {
@@ -2153,12 +2138,8 @@ function writeJobStatus(job) {
     permission_mode: job.permission_mode,
     safety_mode: job.safety_mode,
     claude_settings_active: job.claude_settings_active,
-    recommended_poll_after_ms: recommendedPollAfterMs(job),
-    next_poll: nextPollHint(job),
     phase: job.phase,
     phase_message: job.phase_message,
-    observed_state: observedState(job, idle, []),
-    suggested_action: suggestedAction(job, idle, []),
     process_alive: Boolean(job.process_alive),
     process_pid: job.process_pid ?? null,
     output_format: job.output_format,
@@ -2192,7 +2173,6 @@ function writeJobStatus(job) {
     recent_events: job.stream_events ?? [],
     last_output_at: job.last_output_at,
     idle_seconds: idle.idle_seconds,
-    status_message: statusMessage(job, idle),
     result: job.result,
     error: job.error,
     cancel_requested: job.cancel_requested,
@@ -2219,7 +2199,7 @@ function implementationSchema() {
         type: "string",
         enum: Object.keys(USE_CASES),
         description:
-          "Task preset. Defaults to auto, which uses deepseek-v4-flash with thinking enabled and reasoning_effort=max. Use debug_loop/agentic_coding/complex_reasoning/long_context_codebase for Pro[1m] work.",
+          "Model/task preset. Defaults to auto: deepseek-v4-flash, thinking enabled, reasoning_effort=max, for ordinary implementation. Use fast_patch for tiny edits, scaffold_or_tests for tests/glue, debug_loop for reproduce/fix/check, and agentic_coding/complex_reasoning/long_context_codebase for DeepSeek V4 Pro[1m] work that needs broad context or hard reasoning.",
       },
       worker_profile: {
         type: "string",
@@ -2248,16 +2228,12 @@ function implementationSchema() {
           "Optional caller-imposed stop time for the worker process. Async jobs have no default worker timeout; sync calls default to a short foreground protection limit.",
       },
       check_timeout_ms: { type: "number", description: "Per-check timeout. Defaults to 10 minutes." },
-      poll_after_ms: {
-        type: "number",
-        description: "Suggested async status-check interval returned to callers. This is a hint, not a timeout or liveness policy.",
-      },
       idle_after_ms: {
         type: "number",
         description: "Quiet-output threshold for status messages only. This is not a cancellation, takeover, review, or failure threshold.",
       },
-      allow_docs_only: { type: "boolean", description: "Allow documentation-only diffs. Defaults to false." },
-      model: { type: "string", description: "Optional Claude Code model override passed to claude-deepseek. Defaults from use_case." },
+      allow_docs_only: { type: "boolean", description: "Deprecated compatibility field. Docs-only changes are reported, not rejected, in this build." },
+      model: { type: "string", description: "Optional Claude Code model override passed to claude-deepseek. Prefer use_case unless the caller has a specific model reason." },
       thinking: {
         type: "string",
         enum: ["enabled", "disabled"],
@@ -2691,7 +2667,7 @@ function computeFileDiffs(before, after, changes) {
 
 function buildReviewSummary({ changedFiles, diffAvailable, policy, checks, failureReason, requiresReview, job = null }) {
   const checksPassed = checks.filter((c) => c.exit_code === 0 && !c.timed_out);
-  return {
+  const summary = {
     files_changed: changedFiles.sort(),
     change_count: changedFiles.length,
     policy_ok: policy.ok,
@@ -2700,11 +2676,9 @@ function buildReviewSummary({ changedFiles, diffAvailable, policy, checks, failu
     requires_review: requiresReview,
     diff_available: diffAvailable,
     failure_reason: failureReason,
-    last_successful_tool: job?.last_successful_tool ?? null,
-    last_failed_tool: job?.last_failed_tool ?? null,
     last_error_kind: job?.last_error_kind ?? null,
-    tool_calls_since_last_change: job?.tool_calls_since_last_change ?? 0,
   };
+  return summary;
 }
 
 function appendBounded(current, addition) {

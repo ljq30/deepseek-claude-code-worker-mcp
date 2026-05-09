@@ -149,14 +149,6 @@ send(5, "tools/call", {
   arguments: { job_id: runningJobId },
 });
 send(6, "tools/call", {
-  name: "deepseek_start_implementation",
-  arguments: {
-    cwd,
-    task: "Smoke should not start because poll_after_ms is invalid.",
-    poll_after_ms: 0,
-  },
-});
-send(7, "tools/call", {
   name: "deepseek_get_job",
   arguments: { job_id: jobId, include_logs: true, include_events: true, include_diff: true },
 });
@@ -166,9 +158,7 @@ const getJob = parseToolPayload(getJobResponse);
 const waitJob = parseToolPayload(await waitForResponseId(3, 5000));
 const noWaitJob = parseToolPayload(await waitForResponseId(4, 5000));
 const runningNoWaitJob = parseToolPayload(await waitForResponseId(5, 5000));
-const invalidPoll = await waitForResponseId(6, 5000);
-const invalidPollPayload = parseToolPayload(invalidPoll);
-const verboseGetJob = parseToolPayload(await waitForResponseId(7, 5000));
+const verboseGetJob = parseToolPayload(await waitForResponseId(6, 5000));
 server.kill("SIGTERM");
 runningPlaceholder.kill("SIGTERM");
 rmSync(jobDir, { recursive: true, force: true });
@@ -178,23 +168,20 @@ rmSync(cwd, { recursive: true, force: true });
 console.log(JSON.stringify({
   get_status: getJob.status,
   get_has_structured_content: getJobResponse.result?.structuredContent?.server_version != null,
-  get_observed_state: getJob.progress?.observed_state,
   wait_status: waitJob.status,
   wait_reason: waitJob.reason,
   no_wait_status: noWaitJob.status,
   no_wait_reason: noWaitJob.reason,
   running_no_wait_status: runningNoWaitJob.status,
   running_no_wait_reason: runningNoWaitJob.reason,
-  running_pending_tool_use: runningNoWaitJob.progress?.pending_tool_use,
-  running_pending_tool_duration_seconds: runningNoWaitJob.progress?.pending_tool_duration_seconds,
   default_get_has_logs: hasKeyDeep(getJob, "stdout_tail") || hasKeyDeep(getJob, "stderr_tail"),
   default_get_has_events: hasKeyDeep(getJob, "recent_events"),
   default_get_has_diffs: hasKeyDeep(getJob, "file_diffs"),
+  default_get_has_poll_hint: hasKeyDeep(getJob, "recommended_poll_after_ms") || hasKeyDeep(getJob, "next_poll"),
+  default_get_has_tool_debug: hasKeyDeep(getJob, "pending_tool_duration_seconds") || hasKeyDeep(getJob, "tool_calls_since_last_change"),
   verbose_get_has_logs: hasKeyDeep(verboseGetJob, "stdout_tail") && hasKeyDeep(verboseGetJob, "stderr_tail"),
   verbose_get_has_events: hasKeyDeep(verboseGetJob, "recent_events"),
   verbose_get_has_diffs: hasKeyDeep(verboseGetJob, "file_diffs"),
-  invalid_poll_is_error: invalidPoll.result?.isError ?? false,
-  invalid_poll_error: invalidPollPayload.error?.message ?? null,
   changed_files: getJob.progress?.changed_files_so_far ?? [],
   auto_reasoning_effort: USE_CASES.auto.reasoning_effort,
 }, null, 2));
@@ -203,25 +190,25 @@ if (stderr) process.stderr.write(stderr);
 if (
   getJob.status !== "orphaned"
   || getJobResponse.result?.structuredContent?.server_version == null
-  || getJob.progress?.observed_state !== "orphaned_after_mcp_restart"
-  || waitJob.status !== "needs_review"
+  || hasKeyDeep(getJob, "observed_state")
+  || waitJob.status !== "orphaned"
   || waitJob.reason !== "orphaned_after_mcp_restart"
-  || noWaitJob.status !== "needs_review"
+  || noWaitJob.status !== "orphaned"
   || noWaitJob.reason !== "orphaned_after_mcp_restart"
   || runningNoWaitJob.status !== "running"
   || runningNoWaitJob.reason !== "no_wait_requested"
-  || runningNoWaitJob.progress?.pending_tool_use !== "Read"
-  || !(runningNoWaitJob.progress?.pending_tool_duration_seconds >= 1)
   || hasKeyDeep(getJob, "stdout_tail")
   || hasKeyDeep(getJob, "stderr_tail")
   || hasKeyDeep(getJob, "recent_events")
   || hasKeyDeep(getJob, "file_diffs")
+  || hasKeyDeep(getJob, "recommended_poll_after_ms")
+  || hasKeyDeep(getJob, "next_poll")
+  || hasKeyDeep(getJob, "pending_tool_duration_seconds")
+  || hasKeyDeep(getJob, "tool_calls_since_last_change")
   || !hasKeyDeep(verboseGetJob, "stdout_tail")
   || !hasKeyDeep(verboseGetJob, "stderr_tail")
   || !hasKeyDeep(verboseGetJob, "recent_events")
   || !hasKeyDeep(verboseGetJob, "file_diffs")
-  || invalidPoll.result?.isError !== true
-  || invalidPollPayload.error?.message !== "poll_after_ms must be a positive number"
   || !getJob.progress?.changed_files_so_far?.includes("sample.js")
   || USE_CASES.auto.reasoning_effort !== "max"
 ) {

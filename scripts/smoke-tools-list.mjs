@@ -40,15 +40,16 @@ const checks = {
   start_mentions_async: /async DeepSeek V4 coding worker/.test(start?.description ?? ""),
   start_mentions_one_worker_per_task: /one clearly scoped implementation task/.test(start?.description ?? "")
     && /Do not start a second worker for the same task while the first job is running/.test(start?.description ?? ""),
-  start_mentions_compact_polling: /poll compact status with deepseek_get_job/.test(start?.description ?? ""),
+  start_avoids_polling_instruction: !/poll compact status with deepseek_get_job/.test(start?.description ?? ""),
   start_mentions_default_max: /reasoning_effort=max/.test(start?.description ?? ""),
   start_has_title: start?.title === "Start DeepSeek worker job",
   start_has_output_schema: start?.outputSchema?.type === "object",
-  get_mentions_omit_evidence: /omits stdout\/stderr, stream events, and per-file diffs/.test(get?.description ?? ""),
+  get_mentions_omit_evidence: /omits stdout\/stderr, stream events, per-file diffs/.test(get?.description ?? ""),
   wait_mentions_not_main_loop: /not the main polling loop/.test(wait?.description ?? ""),
   task_schema_keeps_review_in_host: /final review in the host agent/.test(schema.task?.description ?? ""),
   task_schema_mentions_followup_context: /previous job_id, terminal status, failure\/check result, and current diff summary/.test(schema.task?.description ?? ""),
   use_case_schema_mentions_auto_max: /Defaults to auto.*reasoning_effort=max/.test(schema.use_case?.description ?? ""),
+  start_schema_hides_poll_after: schema.poll_after_ms == null,
   no_extra_properties: start?.inputSchema?.additionalProperties === false,
 };
 
