@@ -17,6 +17,11 @@ const cases = [
     expected: { kind: "tool_use", tool_name: "Read", summary: "content_block_start:tool_use:Read", phase: "tool_activity" },
   },
   {
+    name: "tool input delta",
+    event: { type: "content_block_delta", delta: { type: "input_json_delta", partial_json: "{\"file_path\"" } },
+    expected: { kind: "tool_input_delta", summary: "content_block_delta:input_json_delta", phase: "tool_input_streaming" },
+  },
+  {
     name: "tool result content block",
     event: { type: "content_block_start", content_block: { type: "tool_result", is_error: true } },
     expected: { kind: "tool_result", is_error: true, summary: "content_block_start:tool_result", phase: "tool_activity" },

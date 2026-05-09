@@ -38,6 +38,9 @@ export function phaseFromClaudeEvent(event) {
   const type = detail.type;
   const subtype = detail.subtype;
   const summary = summarizeClaudeEvent(event);
+  if (detail.kind === "tool_input_delta") {
+    return { phase: "tool_input_streaming", message: `Claude Code is streaming tool input JSON: ${summary}` };
+  }
   if (detail.kind === "tool_use" || detail.kind === "tool_result" || String(type).includes("tool") || String(subtype).includes("tool")) {
     return { phase: "tool_activity", message: `Claude Code stream event: ${summary}` };
   }
@@ -71,6 +74,9 @@ export function classifyClaudeEvent(event) {
 
   if (delta?.type === "thinking_delta") {
     return { type, subtype: "thinking_delta", kind: "thinking_delta", tool_name: null };
+  }
+  if (delta?.type === "input_json_delta") {
+    return { type, subtype: "input_json_delta", kind: "tool_input_delta", tool_name: toolName };
   }
   if (contentBlock?.type === "tool_use" || subtype === "tool_use" || type === "tool_use") {
     return { type, subtype: "tool_use", kind: "tool_use", tool_name: toolName };

@@ -30,7 +30,7 @@ GitHub / no global install:
     "deepseek-code-worker": {
       "command": "npx",
       "args": [
-        "github:louchi1984-coder/deepseek-claude-code-worker-mcp#v0.3.20-beta.32"
+        "github:louchi1984-coder/deepseek-claude-code-worker-mcp#v0.3.20-beta.33"
       ]
     }
   }
@@ -63,14 +63,14 @@ Source-mode MCP config:
 Check a GitHub tag without installing:
 
 ```bash
-npx github:louchi1984-coder/deepseek-claude-code-worker-mcp#v0.3.20-beta.32 --doctor
+npx github:louchi1984-coder/deepseek-claude-code-worker-mcp#v0.3.20-beta.33 --doctor
 ```
 
 Expected shape:
 
 ```json
 {
-  "server_version": "0.3.20-beta.32",
+  "server_version": "0.3.20-beta.33",
   "ok": true
 }
 ```

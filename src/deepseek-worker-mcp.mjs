@@ -657,6 +657,10 @@ function restoreJob(jobId) {
     last_event_summary: data.last_event_summary ?? null,
     last_stream_kind: data.last_stream_kind ?? null,
     pending_tool_use: data.pending_tool_use ?? null,
+    streaming_tool_input: data.streaming_tool_input ?? null,
+    last_tool_input_at: data.last_tool_input_at ?? null,
+    last_tool_input_completed_at: data.last_tool_input_completed_at ?? null,
+    last_tool_result_inferred: Boolean(data.last_tool_result_inferred),
     last_tool_use_at: data.last_tool_use_at ?? null,
     last_tool_result_at: data.last_tool_result_at ?? null,
     last_tool_name: data.last_tool_name ?? null,
@@ -727,6 +731,10 @@ function createJob(jobId, jobDir, prepared) {
     last_event_summary: null,
     last_stream_kind: null,
     pending_tool_use: null,
+    streaming_tool_input: null,
+    last_tool_input_at: null,
+    last_tool_input_completed_at: null,
+    last_tool_result_inferred: false,
     last_tool_use_at: null,
     last_tool_result_at: null,
     last_tool_name: null,
@@ -1780,6 +1788,7 @@ function compactProgress(progress) {
     last_event_summary: progress.last_event_summary,
     last_stream_kind: progress.last_stream_kind,
     pending_tool_use: progress.pending_tool_use,
+    streaming_tool_input: progress.streaming_tool_input,
     pending_tool_duration_ms: progress.pending_tool_duration_ms,
     pending_tool_duration_seconds: progress.pending_tool_duration_seconds,
     last_successful_tool: progress.last_successful_tool,
@@ -1816,6 +1825,7 @@ function progressForJob(job) {
       last_event_summary: job.last_event_summary ?? null,
       last_stream_kind: job.last_stream_kind ?? null,
       pending_tool_use: job.pending_tool_use ?? null,
+      streaming_tool_input: job.streaming_tool_input ?? null,
       ...pendingToolDuration(job),
       last_tool_name: job.last_tool_name ?? null,
       ...idle,
@@ -1844,10 +1854,14 @@ function progressForJob(job) {
     last_event_summary: job.last_event_summary ?? null,
     last_stream_kind: job.last_stream_kind ?? null,
     pending_tool_use: job.pending_tool_use ?? null,
+    streaming_tool_input: job.streaming_tool_input ?? null,
+    last_tool_input_at: job.last_tool_input_at ?? null,
+    last_tool_input_completed_at: job.last_tool_input_completed_at ?? null,
     ...pendingToolDuration(job),
     last_tool_name: job.last_tool_name ?? null,
     last_tool_use_at: job.last_tool_use_at ?? null,
     last_tool_result_at: job.last_tool_result_at ?? null,
+    last_tool_result_inferred: Boolean(job.last_tool_result_inferred),
     last_successful_tool: job.last_successful_tool ?? null,
     last_failed_tool: job.last_failed_tool ?? null,
     last_error_kind: job.last_error_kind ?? null,
@@ -1965,6 +1979,7 @@ function observedState(job, idle, changedFiles) {
   if (job.status === "failed") return "failed";
   if (job.status === "cancel_requested") return "cancel_requested";
   if (!job.process_alive && job.status === "running") return "process_not_alive";
+  if (job.process_alive && job.streaming_tool_input) return "alive_streaming_tool_input";
   if (job.process_alive && job.pending_tool_use && changedFiles.length === 0 && idle.quiet) return "alive_quiet_after_tool_use";
   if (job.process_alive && changedFiles.length > 0 && idle.quiet) return "alive_quiet_with_workspace_changes";
   if (job.process_alive && changedFiles.length > 0) return "alive_with_workspace_changes";
@@ -1980,8 +1995,11 @@ function suggestedAction(job, idle, changedFiles) {
   if (job.status === "completed") return "inspect result and checks_run";
   if (job.status === "failed") return "inspect failure_reason, policy, checks_run, and worker logs";
   if (job.status === "cancel_requested") return "wait for artifact review after cancellation";
+  if (job.process_alive && job.streaming_tool_input) {
+    return "Claude Code is still streaming tool input JSON; this is model/tool-call generation, not a submitted tool waiting for result";
+  }
   if (job.process_alive && job.pending_tool_use && changedFiles.length === 0 && idle.quiet) {
-    return "worker is alive and quiet after a tool_use without a matching tool_result; keep observing unless there is an explicit error or the user asks to stop";
+    return "worker is alive and quiet after a submitted tool call; Claude Code stream-json may omit explicit tool_result, so check for later message_start, file changes, or terminal result before treating it as stuck";
   }
   if (job.process_alive && changedFiles.length > 0 && idle.quiet) {
     return "worker is alive and quiet after producing files; do not review partial artifacts or cancel solely because of quiet time";
@@ -1998,6 +2016,14 @@ function recordClaudeEvent(job, event, summary) {
   const now = new Date();
   const detail = classifyClaudeEvent(event);
   const eventType = detail.type ?? "unknown";
+  const payload = event?.event && typeof event.event === "object" ? event.event : event;
+  const nowIso = now.toISOString();
+  if (job.pending_tool_use && isModelResumedAfterTool(detail)) {
+    job.last_successful_tool = job.pending_tool_use;
+    job.last_tool_result_at = nowIso;
+    job.last_tool_result_inferred = true;
+    job.pending_tool_use = null;
+  }
   job.updated_at = now.toISOString();
   job.last_event_at_ms = now.getTime();
   job.last_event_at = now.toISOString();
@@ -2005,14 +2031,25 @@ function recordClaudeEvent(job, event, summary) {
   job.last_event_summary = summary;
   job.last_stream_kind = detail.kind;
   if (detail.kind === "tool_use") {
-    job.pending_tool_use = detail.tool_name ?? "unknown_tool";
+    job.streaming_tool_input = detail.tool_name ?? "unknown_tool";
+    job.last_tool_input_at = nowIso;
     job.last_tool_name = detail.tool_name ?? job.last_tool_name ?? null;
-    job.last_tool_use_at = now.toISOString();
     job.tool_calls_since_last_change = (job.tool_calls_since_last_change ?? 0) + 1;
+  } else if (detail.kind === "tool_input_delta") {
+    job.last_tool_input_at = nowIso;
+  } else if (detail.kind === "content_block_stop" && job.streaming_tool_input != null) {
+    job.pending_tool_use = job.streaming_tool_input;
+    job.last_tool_name = job.streaming_tool_input;
+    job.last_tool_use_at = nowIso;
+    job.last_tool_input_completed_at = nowIso;
+    job.last_tool_result_inferred = false;
+    job.streaming_tool_input = null;
   } else if (detail.kind === "tool_result") {
     job.pending_tool_use = null;
+    job.streaming_tool_input = null;
     job.last_tool_name = detail.tool_name ?? job.last_tool_name ?? null;
-    job.last_tool_result_at = now.toISOString();
+    job.last_tool_result_at = nowIso;
+    job.last_tool_result_inferred = false;
     if (detail.is_error) {
       job.last_failed_tool = job.last_tool_name;
       job.last_error_kind = "tool_result_error";
@@ -2021,6 +2058,9 @@ function recordClaudeEvent(job, event, summary) {
     }
   } else if (detail.kind === "error_result") {
     job.last_error_kind = "model_result_error";
+  } else if (payload?.type === "result") {
+    job.pending_tool_use = null;
+    job.streaming_tool_input = null;
   }
   job.last_output_at_ms = now.getTime();
   job.last_output_at = now.toISOString();
@@ -2031,6 +2071,13 @@ function recordClaudeEvent(job, event, summary) {
     job.phase_message = phase.message;
   }
   writeJobStatus(job);
+}
+
+function isModelResumedAfterTool(detail) {
+  return detail.kind === "message_start"
+    || detail.kind === "thinking_delta"
+    || detail.kind === "text_delta"
+    || detail.kind === "tool_use";
 }
 
 function appendJobLog(job, stream, text) {
@@ -2092,9 +2139,13 @@ function writeJobStatus(job) {
     last_event_summary: job.last_event_summary,
     last_stream_kind: job.last_stream_kind,
     pending_tool_use: job.pending_tool_use,
+    streaming_tool_input: job.streaming_tool_input,
+    last_tool_input_at: job.last_tool_input_at,
+    last_tool_input_completed_at: job.last_tool_input_completed_at,
     last_tool_name: job.last_tool_name,
     last_tool_use_at: job.last_tool_use_at,
     last_tool_result_at: job.last_tool_result_at,
+    last_tool_result_inferred: Boolean(job.last_tool_result_inferred),
     last_successful_tool: job.last_successful_tool,
     last_failed_tool: job.last_failed_tool,
     last_error_kind: job.last_error_kind,
