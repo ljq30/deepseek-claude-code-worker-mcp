@@ -313,11 +313,15 @@ async function runDoctor() {
   });
 
   const claudeCodeBin = process.env.CLAUDE_BIN || resolveExecutable("claude") || defaultClaudeBin();
+  const resolvedClaudeCodeBin = resolveExecutable(claudeCodeBin);
   checks.push({
     name: "claude_code_cli",
-    ok: Boolean(resolveExecutable(claudeCodeBin)),
-    detail: resolveExecutable(claudeCodeBin) || `not found or not executable: ${claudeCodeBin}`,
+    ok: Boolean(resolvedClaudeCodeBin),
+    detail: resolvedClaudeCodeBin || `not found or not executable: ${claudeCodeBin}`,
   });
+  if (resolvedClaudeCodeBin) {
+    checks.push(await probeClaudeCodeCli(resolvedClaudeCodeBin));
+  }
 
   const keyFile = process.env.DEEPSEEK_API_KEY_FILE || resolve(homedir(), ".codex/secrets/deepseek_api_key");
   const hasToken = Boolean(process.env.ANTHROPIC_AUTH_TOKEN);
@@ -2494,6 +2498,71 @@ function resolveExecutable(command) {
     }
   }
   return null;
+}
+
+async function probeClaudeCodeCli(command) {
+  const result = await runCommandCapture(command, ["--version"], { timeoutMs: 10_000, maxChars: 2000 });
+  const output = `${result.stdout}${result.stderr}`.trim();
+  const oneLine = output.replace(/\s+/g, " ").slice(0, 500);
+  if (result.timedOut) {
+    return {
+      name: "claude_code_version",
+      ok: false,
+      detail: `timed out running ${command} --version`,
+    };
+  }
+  if (result.error) {
+    return {
+      name: "claude_code_version",
+      ok: false,
+      detail: `${command} --version failed to start: ${result.error}`,
+    };
+  }
+  const looksLikeClaudeCode = result.exitCode === 0 && /\bClaude Code\b/i.test(output);
+  return {
+    name: "claude_code_version",
+    ok: looksLikeClaudeCode,
+    detail: looksLikeClaudeCode
+      ? oneLine
+      : `${command} --version returned exit ${result.exitCode}; unexpected output: ${oneLine || "(empty)"}`,
+  };
+}
+
+async function runCommandCapture(command, args, options = {}) {
+  const timeoutMs = options.timeoutMs ?? 10_000;
+  const maxChars = options.maxChars ?? 4000;
+  return await new Promise((resolveResult) => {
+    let settled = false;
+    let stdout = "";
+    let stderr = "";
+    const child = spawn(command, args, {
+      stdio: ["pipe", "pipe", "pipe"],
+      env: process.env,
+    });
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolveResult({
+        stdout: stdout.slice(-maxChars),
+        stderr: stderr.slice(-maxChars),
+        ...result,
+      });
+    };
+    const timer = setTimeout(() => {
+      child.kill("SIGTERM");
+      finish({ exitCode: null, timedOut: true });
+    }, timeoutMs);
+    child.stdout?.on("data", (chunk) => {
+      stdout = appendBounded(stdout, chunk.toString(), maxChars);
+    });
+    child.stderr?.on("data", (chunk) => {
+      stderr = appendBounded(stderr, chunk.toString(), maxChars);
+    });
+    child.once("error", (error) => finish({ exitCode: null, error: error.message }));
+    child.once("close", (code) => finish({ exitCode: code ?? 0, timedOut: false }));
+    child.stdin?.end();
+  });
 }
 
 function isExecutable(path) {

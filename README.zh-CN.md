@@ -8,7 +8,7 @@
 
 ## 当前 Beta
 
-当前 GitHub beta tag：`v0.3.20-beta.37`。
+当前 GitHub beta tag：`v0.3.20-beta.38`。
 
 ## 它做什么
 
@@ -18,7 +18,7 @@
 - 适配 DeepSeek 长思考，默认不乱杀进程
 - 返回状态、变更文件、snapshot diff、policy、checks
 - 默认收敛 Claude Code 权限，不开 `bypassPermissions`
-- 提供 `setup` / `doctor`，方便安装、输入 key、检查环境
+- 提供 `setup` / `doctor`，方便安装、输入 key、检查环境，包括真实运行 `claude --version`
 
 这个 MCP 不是独立 DeepSeek 客户端。它内置一个很小的 `claude-deepseek` 启动器：调用本机 Claude Code CLI，并把子进程请求切到 DeepSeek 的 Anthropic-compatible endpoint。
 
@@ -34,7 +34,7 @@ GitHub / 不做全局安装：
     "deepseek-code-worker": {
       "command": "npx",
       "args": [
-        "github:louchi1984-coder/deepseek-claude-code-worker-mcp#v0.3.20-beta.37"
+        "github:louchi1984-coder/deepseek-claude-code-worker-mcp#v0.3.20-beta.38"
       ]
     }
   }
@@ -67,14 +67,14 @@ npm run mcp:doctor
 检查 GitHub tag，不安装：
 
 ```bash
-npx github:louchi1984-coder/deepseek-claude-code-worker-mcp#v0.3.20-beta.37 --doctor
+npx github:louchi1984-coder/deepseek-claude-code-worker-mcp#v0.3.20-beta.38 --doctor
 ```
 
 看到类似输出即可：
 
 ```json
 {
-  "server_version": "0.3.20-beta.37",
+  "server_version": "0.3.20-beta.38",
   "ok": true
 }
 ```
@@ -248,7 +248,12 @@ Project brief:
 `docs/WORKFLOW_EVAL_RESULTS.md`。这些文件会报告为 `generated_changed`，不会算成
 越界编辑；但如果同一个文件也在 `forbidden_paths`，仍然按 forbidden 硬失败处理。
 
-版本 `0.3.20-beta.37` 的原则：汇报动作，不替 Codex 判案。`allowed_dirs` 外的普通变更会作为事实报告，不再自动判定 worker 失败；`forbidden_paths` 仍然是硬失败。`allow_docs_only` 只保留为兼容旧调用的参数，文档变更会被报告，不再因为 docs-only 自动失败。
+版本 `0.3.20-beta.38` 的原则：汇报动作，不替 Codex 判案。`allowed_dirs` 外的普通变更会作为事实报告，不再自动判定 worker 失败；`forbidden_paths` 仍然是硬失败。`allow_docs_only` 只保留为兼容旧调用的参数，文档变更会被报告，不再因为 docs-only 自动失败。
+
+如果 `doctor` 报 `claude_code_version` 失败，说明 `claude` 命令虽然存在，
+但不是可用的 Claude Code CLI。常见原因是 wrapper 脚本、旧 shim 或调试脚本
+截住了 `claude --version`。修复本机 Claude Code 安装，或把 `CLAUDE_BIN`
+指向真实 Claude Code 可执行文件后，再重新运行 `doctor`。
 
 ## 验证
 

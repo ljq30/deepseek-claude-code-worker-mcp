@@ -8,7 +8,7 @@ Goal: **save Codex main-thread tokens, not DeepSeek tokens**. For suitable codin
 
 ## Current Beta
 
-Current GitHub beta tag: `v0.3.20-beta.37`.
+Current GitHub beta tag: `v0.3.20-beta.38`.
 
 ## What It Does
 
@@ -18,7 +18,7 @@ Current GitHub beta tag: `v0.3.20-beta.37`.
 - Supports long DeepSeek thinking without killing the worker by default
 - Returns status, changed files, snapshot diffs, policy, and checks
 - Uses scoped Claude Code permissions by default; `bypassPermissions` stays off
-- Includes `setup` / `doctor` for install, auth, and environment checks
+- Includes `setup` / `doctor` for install, auth, and environment checks, including a real `claude --version` probe
 
 This is not a standalone DeepSeek client. It includes a small `claude-deepseek` launcher that runs the local Claude Code CLI against DeepSeek's Anthropic-compatible endpoint.
 
@@ -34,7 +34,7 @@ GitHub / no global install:
     "deepseek-code-worker": {
       "command": "npx",
       "args": [
-        "github:louchi1984-coder/deepseek-claude-code-worker-mcp#v0.3.20-beta.37"
+        "github:louchi1984-coder/deepseek-claude-code-worker-mcp#v0.3.20-beta.38"
       ]
     }
   }
@@ -67,14 +67,14 @@ Source-mode MCP config:
 Check a GitHub tag without installing:
 
 ```bash
-npx github:louchi1984-coder/deepseek-claude-code-worker-mcp#v0.3.20-beta.37 --doctor
+npx github:louchi1984-coder/deepseek-claude-code-worker-mcp#v0.3.20-beta.38 --doctor
 ```
 
 Expected shape:
 
 ```json
 {
-  "server_version": "0.3.20-beta.37",
+  "server_version": "0.3.20-beta.38",
   "ok": true
 }
 ```
@@ -251,7 +251,12 @@ create or update, such as `docs/WORKFLOW_EVAL_RESULTS.md`. These paths are
 reported as `generated_changed` and are not counted as out-of-scope edits, while
 `forbidden_paths` still wins if the same file is forbidden.
 
-Version `0.3.20-beta.37` principle: report actions, do not adjudicate. `allowed_dirs` changes outside the target scope are reported as facts, not automatically treated as failed work. `forbidden_paths` remains a hard failure. `allow_docs_only` is kept only for compatibility with older calls; documentation changes are reported and no longer fail just because they are docs-only.
+Version `0.3.20-beta.38` principle: report actions, do not adjudicate. `allowed_dirs` changes outside the target scope are reported as facts, not automatically treated as failed work. `forbidden_paths` remains a hard failure. `allow_docs_only` is kept only for compatibility with older calls; documentation changes are reported and no longer fail just because they are docs-only.
+
+If `doctor` reports `claude_code_version` as failed, the `claude` command exists
+but is not a usable Claude Code CLI. A common cause is a wrapper script or stale
+shim that intercepts `claude --version`. Fix the local Claude Code install or set
+`CLAUDE_BIN` to the real Claude Code executable, then rerun `doctor`.
 
 ## Verification
 
